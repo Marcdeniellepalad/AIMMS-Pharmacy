@@ -1,0 +1,1 @@
+prescriptionID,customerID,patientName,prescriberName,prescriberLicenseNumber,prescriptionDate,dateReceived,validUntil,sourceType,sourceReference,status

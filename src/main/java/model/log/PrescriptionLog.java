@@ -1,0 +1,80 @@
+package model.log;
+
+import java.time.LocalDateTime;
+
+public class PrescriptionLog {
+
+    private final String logID;
+    private final String prescriptionID;
+    private final String actorID;
+    private final String actorRole;
+    private final PrescriptionLogAction action;
+    private final LocalDateTime dateTime;
+    private final String reason;
+    private final String outcome;
+    private final String relatedRecordID;
+    private final String details;
+
+    public PrescriptionLog(
+            String logID,
+            String prescriptionID,
+            String actorID,
+            String actorRole,
+            PrescriptionLogAction action,
+            LocalDateTime dateTime,
+            String reason,
+            String outcome,
+            String relatedRecordID,
+            String details) {
+        this.logID = logID;
+        this.prescriptionID = prescriptionID;
+        this.actorID = actorID;
+        this.actorRole = actorRole;
+        this.action = action;
+        this.dateTime = dateTime;
+        this.reason = reason;
+        this.outcome = outcome;
+        this.relatedRecordID = relatedRecordID;
+        this.details = details;
+    }
+
+    public String getLogID() {
+        return logID;
+    }
+
+    public String getPrescriptionID() {
+        return prescriptionID;
+    }
+
+    public String getActorID() {
+        return actorID;
+    }
+
+    public String getActorRole() {
+        return actorRole;
+    }
+
+    public PrescriptionLogAction getAction() {
+        return action;
+    }
+
+    public LocalDateTime getDateTime() {
+        return dateTime;
+    }
+
+    public String getReason() {
+        return reason;
+    }
+
+    public String getOutcome() {
+        return outcome;
+    }
+
+    public String getRelatedRecordID() {
+        return relatedRecordID;
+    }
+
+    public String getDetails() {
+        return details;
+    }
+}

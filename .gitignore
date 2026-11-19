@@ -1,0 +1,7 @@
+/out/
+/target/
+*.class
+.env
+/data/runtime/**
+!/data/runtime/.gitkeep
+/data/prescriptions/files/
