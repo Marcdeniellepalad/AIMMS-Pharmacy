@@ -65,9 +65,9 @@ Admin overview
 ## Role notes and unresolved decisions
 
 - Pharmacists process counter sales, verify prescriptions, and submit restock requests.
-- Authorized staff record delivered stock and batch details. The team has not decided whether a separate restock approval step is needed, so the proposed screens contain no approve or reject action.
+- Administrators approve a request while recording delivered quantity, supplier lot number, and expiration date. Saving creates a batch and increases inventory; partial receipts can be recorded against the remaining request quantity.
 - The exact prescription formats, medicine classes, record-retention rules, void adjustment rules, and multi-workstation deployment remain open in [project decisions](decisions.md). The screens should not imply those policies are settled.
 
 ## First visual review set
 
-The mockups cover inventory work, administrator account review and audit, plus startup and page loading states. The Swing app now has data-backed screens for these areas and the related customer, prescription, and transaction records. It loads records asynchronously and shows skeletons while reading CSV files. Catalog item creation is connected to `ItemRepository`; approval, sale, and restock receipt writes still need coordinated workflow services. The selected sidebar row uses solid maroon with white icon and label; primary buttons with maroon backgrounds use white text.
+The mockups cover inventory work, administrator account review and audit, plus startup and page loading states. The Swing app now has data-backed screens for these areas and the related customer, prescription, and transaction records. It loads records asynchronously and shows skeletons while reading CSV files. Catalog item creation is connected to `ItemRepository`; admin restock receipt and OTC sale updates use the local recovery writer. The selected sidebar row uses solid maroon with white icon and label; primary buttons with maroon backgrounds use white text.

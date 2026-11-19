@@ -588,18 +588,26 @@ public final class PharmacyAppFrame extends JFrame {
             applySearch();
             return;
         }
-        JPanel page = new JPanel();
+        JPanel page = new JPanel(new GridBagLayout());
         page.setOpaque(false);
-        page.setLayout(new BoxLayout(page, BoxLayout.Y_AXIS));
         page.setBorder(BorderFactory.createEmptyBorder(24, 28, 30, 28));
-        page.add(buildPageHeading(screen));
-        page.add(Box.createVerticalStrut(18));
+        GridBagConstraints pageConstraints = new GridBagConstraints();
+        pageConstraints.gridx = 0;
+        pageConstraints.gridy = 0;
+        pageConstraints.weightx = 1;
+        pageConstraints.fill = GridBagConstraints.HORIZONTAL;
+        pageConstraints.anchor = GridBagConstraints.FIRST_LINE_START;
+        pageConstraints.insets = new Insets(0, 0, 18, 0);
+        page.add(buildPageHeading(screen), pageConstraints);
         if (!data.metrics().isEmpty()) {
-            page.add(buildMetricRow(data.metrics()));
-            page.add(Box.createVerticalStrut(18));
+            pageConstraints.gridy++;
+            page.add(buildMetricRow(data.metrics()), pageConstraints);
         }
-        page.add(buildTableCard(screen, data));
-        page.add(Box.createVerticalGlue());
+        pageConstraints.gridy++;
+        pageConstraints.weighty = 1;
+        pageConstraints.fill = GridBagConstraints.BOTH;
+        pageConstraints.insets = new Insets(0, 0, 0, 0);
+        page.add(buildTableCard(screen, data), pageConstraints);
         showPageComponent(page);
         applySearch();
     }
@@ -633,8 +641,13 @@ public final class PharmacyAppFrame extends JFrame {
             JButton sale = primaryButton("＋ New sale");
             sale.addActionListener(event -> openScreen(Screen.COUNTER_SALE));
             heading.add(sale, BorderLayout.EAST);
-        } else if (screen == Screen.RESTOCK_REQUESTS
-                && currentUser != null && currentUser.role() == UserRole.PHARMACIST) {
+        } else if (screen == Screen.RESTOCK_REQUESTS && currentUser != null
+                && currentUser.role() == UserRole.ADMIN) {
+            JButton approve = primaryButton("Approve / receive selected");
+            approve.addActionListener(event -> approveSelectedRestockRequest());
+            heading.add(approve, BorderLayout.EAST);
+        } else if (screen == Screen.RESTOCK_REQUESTS && currentUser != null
+                && currentUser.role() == UserRole.PHARMACIST) {
             JButton request = primaryButton("＋ New request");
             request.addActionListener(event -> openRestockRequestPreview());
             heading.add(request, BorderLayout.EAST);
@@ -643,20 +656,24 @@ public final class PharmacyAppFrame extends JFrame {
     }
 
     private JPanel buildCounterSalePage(ScreenData data) {
-        JPanel page = new JPanel();
+        JPanel page = new JPanel(new GridBagLayout());
         page.setOpaque(false);
-        page.setLayout(new BoxLayout(page, BoxLayout.Y_AXIS));
         page.setBorder(BorderFactory.createEmptyBorder(24, 28, 30, 28));
-        page.add(buildPageHeading(Screen.COUNTER_SALE));
-        page.add(Box.createVerticalStrut(18));
+        GridBagConstraints pageConstraints = new GridBagConstraints();
+        pageConstraints.gridx = 0;
+        pageConstraints.gridy = 0;
+        pageConstraints.weightx = 1;
+        pageConstraints.fill = GridBagConstraints.HORIZONTAL;
+        pageConstraints.anchor = GridBagConstraints.FIRST_LINE_START;
+        pageConstraints.insets = new Insets(0, 0, 18, 0);
+        page.add(buildPageHeading(Screen.COUNTER_SALE), pageConstraints);
 
         JPanel columns = new JPanel(new GridLayout(1, 2, 16, 0));
         columns.setOpaque(false);
-        columns.setAlignmentX(Component.LEFT_ALIGNMENT);
         int columnHeight = Math.max(480, getHeight() - 285);
         columns.setPreferredSize(new Dimension(0, columnHeight));
         columns.setMinimumSize(new Dimension(0, columnHeight));
-        columns.setMaximumSize(new Dimension(Integer.MAX_VALUE, columnHeight));
+        columns.setMaximumSize(new Dimension(Integer.MAX_VALUE, Integer.MAX_VALUE));
 
         JPanel catalogCard = cardPanel(new BorderLayout(0, 12));
         catalogCard.setBorder(BorderFactory.createEmptyBorder(18, 18, 16, 18));
@@ -716,7 +733,7 @@ public final class PharmacyAppFrame extends JFrame {
         JTextField customer = new JTextField();
         customer.setFont(UI_FONT);
         customer.setForeground(TEXT);
-        customer.setToolTipText("Optional customer ID for this preview");
+        customer.setToolTipText("Optional active customer ID to associate with this sale");
         customer.setBorder(BorderFactory.createCompoundBorder(
                 BorderFactory.createLineBorder(BORDER), BorderFactory.createEmptyBorder(8, 10, 8, 10)));
         JPanel customerField = new JPanel(new BorderLayout(0, 5));
@@ -752,19 +769,23 @@ public final class PharmacyAppFrame extends JFrame {
         totalRow.add(totalCaption, BorderLayout.WEST);
         totalRow.add(cartTotalLabel, BorderLayout.EAST);
         cartFooter.add(totalRow);
-        JLabel previewNotice = new JLabel("<html>Preview only. Sale, stock, prescription, and audit<br>records are not saved yet.</html>");
+        JLabel previewNotice = new JLabel("<html>Completion saves transaction, stock, and audit records<br>to this computer's runtime CSV files.</html>");
         previewNotice.setFont(new Font("Segoe UI", Font.PLAIN, 10));
         previewNotice.setForeground(MUTED);
         previewNotice.setBorder(BorderFactory.createEmptyBorder(7, 0, 10, 0));
         cartFooter.add(previewNotice);
-        JButton reviewSale = primaryButton("Review sale");
+        JButton reviewSale = primaryButton("Review and complete sale");
         reviewSale.setAlignmentX(Component.LEFT_ALIGNMENT);
         reviewSale.setMaximumSize(new Dimension(Integer.MAX_VALUE, 40));
         reviewSale.addActionListener(event -> showSaleReview(customer.getText()));
         cartFooter.add(reviewSale);
         cartCard.add(cartFooter, BorderLayout.SOUTH);
         columns.add(cartCard);
-        page.add(columns);
+        pageConstraints.gridy = 1;
+        pageConstraints.weighty = 1;
+        pageConstraints.fill = GridBagConstraints.BOTH;
+        pageConstraints.insets = new Insets(0, 0, 0, 0);
+        page.add(columns, pageConstraints);
         renderCart();
         return page;
     }
@@ -892,20 +913,33 @@ public final class PharmacyAppFrame extends JFrame {
                     JOptionPane.INFORMATION_MESSAGE);
             return;
         }
-        StringBuilder summary = new StringBuilder("Sale preview");
+        StringBuilder summary = new StringBuilder("Complete this sale?");
         if (customerID != null && !customerID.isBlank()) {
             summary.append("\nCustomer: ").append(customerID.trim());
         }
         for (CartLine line : cartItems.values()) {
             summary.append("\n").append(line.quantity()).append(" × ").append(line.name());
         }
-        summary.append("\n\nEstimated total: ").append(cartTotalLabel.getText())
-                .append("\n\nThis preview does not save a transaction or deduct stock.");
-        JOptionPane.showMessageDialog(this, summary.toString(), "Review sale", JOptionPane.INFORMATION_MESSAGE);
+        summary.append("\n\nTotal: ").append(cartTotalLabel.getText())
+                .append("\n\nThis saves the sale and deducts eligible stock.");
+        if (JOptionPane.showConfirmDialog(this, summary.toString(), "Confirm sale",
+                JOptionPane.OK_CANCEL_OPTION, JOptionPane.WARNING_MESSAGE) != JOptionPane.OK_OPTION) return;
+        try {
+            List<PharmacyScreenService.SaleLine> lines = cartItems.values().stream()
+                    .map(line -> new PharmacyScreenService.SaleLine(line.itemID(), line.quantity())).toList();
+            String transactionID = controller.completeSale(customerID, lines, currentUser.userID(), currentUser.role().name());
+            cartItems.clear();
+            renderCart();
+            JOptionPane.showMessageDialog(this, "Sale saved as " + transactionID + ". Stock and audit CSVs were updated.",
+                    "Sale completed", JOptionPane.INFORMATION_MESSAGE);
+            openScreen(Screen.COUNTER_SALE);
+        } catch (RuntimeException ex) {
+            JOptionPane.showMessageDialog(this, actionErrorMessage(ex), "Sale not completed", JOptionPane.WARNING_MESSAGE);
+        }
     }
 
     private void openRestockRequestPreview() {
-        JDialog dialog = new JDialog(this, "New restock request · Preview", true);
+        JDialog dialog = new JDialog(this, "New restock request", true);
         dialog.setLayout(new BorderLayout());
         JPanel content = new JPanel(new BorderLayout(0, 16));
         content.setBackground(WHITE);
@@ -916,42 +950,46 @@ public final class PharmacyAppFrame extends JFrame {
         content.add(title, BorderLayout.NORTH);
         JPanel form = new JPanel(new GridBagLayout());
         form.setOpaque(false);
-        JTextField medicine = new JTextField(22);
+        JComboBox<ItemOption> medicine = new JComboBox<>();
+        for (List<String> item : controller.load(Screen.INVENTORY_ITEMS).rows()) {
+            medicine.addItem(new ItemOption(item.get(2), item.get(0)));
+        }
         JTextField quantity = new JTextField(22);
         JTextField reason = new JTextField(22);
         addFormRow(form, 0, "Medicine", medicine);
         addFormRow(form, 1, "Quantity requested", quantity);
         addFormRow(form, 2, "Reason", reason);
         content.add(form, BorderLayout.CENTER);
-        JLabel note = new JLabel("Preview only · request saving is not connected yet.");
+        JLabel note = new JLabel("The request will be saved to the runtime CSV file.");
         note.setFont(new Font("Segoe UI", Font.PLAIN, 10));
         note.setForeground(MUTED);
         JButton close = secondaryButton("Close");
-        JButton preview = primaryButton("Preview request");
+        JButton save = primaryButton("Save request");
         JPanel footer = new JPanel(new BorderLayout(0, 10));
         footer.setOpaque(false);
         footer.add(note, BorderLayout.NORTH);
         JPanel buttons = new JPanel(new FlowLayout(FlowLayout.RIGHT, 8, 0));
         buttons.setOpaque(false);
         buttons.add(close);
-        buttons.add(preview);
+        buttons.add(save);
         footer.add(buttons, BorderLayout.SOUTH);
         content.add(footer, BorderLayout.SOUTH);
         close.addActionListener(event -> dialog.dispose());
-        preview.addActionListener(event -> {
+        save.addActionListener(event -> {
             try {
+                ItemOption selected = (ItemOption) medicine.getSelectedItem();
                 int requested = Integer.parseInt(quantity.getText().trim());
-                if (medicine.getText().isBlank() || requested <= 0) {
-                    throw new IllegalArgumentException();
+                if (selected == null || requested <= 0) {
+                    throw new IllegalArgumentException("Choose a medicine and quantity greater than zero.");
                 }
-                JOptionPane.showMessageDialog(dialog,
-                        "Request preview for " + medicine.getText().trim() + " · " + requested
-                                + " units\nReason: " + (reason.getText().isBlank() ? "Not provided" : reason.getText().trim())
-                                + "\n\nThis request has not been saved.",
-                        "Restock request preview", JOptionPane.INFORMATION_MESSAGE);
-            } catch (IllegalArgumentException ex) {
-                JOptionPane.showMessageDialog(dialog, "Enter a medicine and a quantity greater than zero.",
-                        "Check request details", JOptionPane.WARNING_MESSAGE);
+                String requestID = controller.createRestockRequest(selected.itemID(), requested,
+                        reason.getText(), currentUser.userID());
+                dialog.dispose();
+                JOptionPane.showMessageDialog(this, "Restock request " + requestID + " was saved.",
+                        "Request submitted", JOptionPane.INFORMATION_MESSAGE);
+                openScreen(Screen.RESTOCK_REQUESTS);
+            } catch (RuntimeException ex) {
+                JOptionPane.showMessageDialog(dialog, actionErrorMessage(ex), "Check request details", JOptionPane.WARNING_MESSAGE);
             }
         });
         dialog.setContentPane(content);
@@ -960,14 +998,12 @@ public final class PharmacyAppFrame extends JFrame {
         dialog.setLocationRelativeTo(this);
         dialog.setVisible(true);
     }
-
     private JPanel buildMetricRow(List<Metric> metrics) {
-        int columns = metrics.size() >= 4 ? 2 : Math.max(1, metrics.size());
+        int columns = metrics.size() >= 4 ? 4 : Math.max(1, metrics.size());
         int rows = (int) Math.ceil((double) metrics.size() / columns);
-        int rowHeight = rows * 102 + Math.max(0, rows - 1) * 12;
-        JPanel row = new JPanel(new GridLayout(rows, columns, 14, 12));
+        int rowHeight = rows * 102 + Math.max(0, rows - 1) * 14;
+        JPanel row = new JPanel(new GridLayout(rows, columns, 14, 14));
         row.setOpaque(false);
-        row.setAlignmentX(Component.LEFT_ALIGNMENT);
         row.setPreferredSize(new Dimension(0, rowHeight));
         row.setMinimumSize(new Dimension(0, rowHeight));
         row.setMaximumSize(new Dimension(Integer.MAX_VALUE, rowHeight));
@@ -997,13 +1033,10 @@ public final class PharmacyAppFrame extends JFrame {
     private JPanel buildTableCard(Screen screen, ScreenData data) {
         JPanel card = cardPanel(new BorderLayout(0, 12));
         card.setBorder(BorderFactory.createEmptyBorder(18, 18, 14, 18));
-        card.setAlignmentX(Component.LEFT_ALIGNMENT);
-        int cardHeight = data.rows().isEmpty()
-                ? Math.min(370, Math.max(310, getHeight() - 520))
-                : Math.max(460, getHeight() - 320);
+        int cardHeight = data.rows().isEmpty() ? 360 : 520;
         card.setPreferredSize(new Dimension(0, cardHeight));
-        card.setMinimumSize(new Dimension(0, cardHeight));
-        card.setMaximumSize(new Dimension(Integer.MAX_VALUE, cardHeight));
+        card.setMinimumSize(new Dimension(0, 310));
+        card.setMaximumSize(new Dimension(Integer.MAX_VALUE, Integer.MAX_VALUE));
 
         JPanel heading = new JPanel(new BorderLayout());
         heading.setOpaque(false);
@@ -1398,6 +1431,95 @@ public final class PharmacyAppFrame extends JFrame {
                 "Review pharmacist account", javax.swing.JOptionPane.INFORMATION_MESSAGE);
     }
 
+    private void approveSelectedRestockRequest() {
+        if (currentUser == null || currentUser.role() != UserRole.ADMIN) {
+            JOptionPane.showMessageDialog(this, "Sign in as an administrator to approve restock requests.",
+                    "Administrator action", JOptionPane.WARNING_MESSAGE);
+            return;
+        }
+        if (currentTable == null || currentTable.getSelectedRow() < 0 || currentData == null) {
+            JOptionPane.showMessageDialog(this, "Select a restock request first.",
+                    "Restock requests", JOptionPane.INFORMATION_MESSAGE);
+            return;
+        }
+        int modelRow = currentTable.convertRowIndexToModel(currentTable.getSelectedRow());
+        List<String> row = currentData.rows().get(modelRow);
+        String requestID = row.get(0);
+        int remaining;
+        try {
+            remaining = Integer.parseInt(row.get(2)) - Integer.parseInt(row.get(3));
+        } catch (NumberFormatException ex) {
+            JOptionPane.showMessageDialog(this, "The request quantity is invalid.",
+                    "Restock request", JOptionPane.WARNING_MESSAGE);
+            return;
+        }
+        if (remaining <= 0 || !("Requested".equals(row.get(6)) || "Approved".equals(row.get(6))
+                || "Partially Received".equals(row.get(6)))) {
+            JOptionPane.showMessageDialog(this, "Only pending or partially received requests can be processed.",
+                    "Restock request", JOptionPane.INFORMATION_MESSAGE);
+            return;
+        }
+
+        JDialog dialog = new JDialog(this, "Approve and receive restock", true);
+        JPanel content = new JPanel(new BorderLayout(0, 14));
+        content.setBackground(WHITE);
+        content.setBorder(BorderFactory.createEmptyBorder(20, 22, 18, 22));
+        JLabel intro = new JLabel("<html><b>" + escapeHtml(row.get(1)) + "</b><br>Request "
+                + escapeHtml(requestID) + " · " + remaining + " unit(s) remaining</html>");
+        intro.setFont(UI_FONT);
+        intro.setForeground(TEXT);
+        content.add(intro, BorderLayout.NORTH);
+        JPanel form = new JPanel(new GridBagLayout());
+        form.setOpaque(false);
+        JTextField quantity = new JTextField(Integer.toString(remaining), 18);
+        JTextField lotNumber = new JTextField(18);
+        JTextField expiration = new JTextField(18);
+        expiration.setToolTipText("Use ISO format: yyyy-MM-dd");
+        addFormRow(form, 0, "Quantity received now", quantity);
+        addFormRow(form, 1, "Supplier lot number", lotNumber);
+        addFormRow(form, 2, "Expiration date (yyyy-MM-dd)", expiration);
+        content.add(form, BorderLayout.CENTER);
+        JLabel note = new JLabel("Enter delivered stock only. Saving creates a batch and updates available inventory.");
+        note.setFont(new Font("Segoe UI", Font.PLAIN, 10));
+        note.setForeground(MUTED);
+        JButton cancel = secondaryButton("Cancel");
+        JButton save = primaryButton("Approve and add stock");
+        JPanel footer = new JPanel(new BorderLayout(0, 10));
+        footer.setOpaque(false);
+        footer.add(note, BorderLayout.NORTH);
+        JPanel actions = new JPanel(new FlowLayout(FlowLayout.RIGHT, 8, 0));
+        actions.setOpaque(false);
+        actions.add(cancel);
+        actions.add(save);
+        footer.add(actions, BorderLayout.SOUTH);
+        content.add(footer, BorderLayout.SOUTH);
+        cancel.addActionListener(event -> dialog.dispose());
+        save.addActionListener(event -> {
+            try {
+                int receivedNow = Integer.parseInt(quantity.getText().trim());
+                java.time.LocalDate expirationDate = java.time.LocalDate.parse(expiration.getText().trim());
+                if (receivedNow <= 0 || receivedNow > remaining) {
+                    throw new IllegalArgumentException("Quantity must be between 1 and " + remaining + ".");
+                }
+                String batchID = controller.approveRestockRequest(requestID, currentUser.userID(),
+                        receivedNow, lotNumber.getText(), expirationDate);
+                dialog.dispose();
+                JOptionPane.showMessageDialog(this,
+                        receivedNow + " unit(s) were added as batch " + batchID + ". The pharmacist inventory now reflects the receipt.",
+                        "Restock approved and received", JOptionPane.INFORMATION_MESSAGE);
+                openScreen(Screen.RESTOCK_REQUESTS);
+            } catch (RuntimeException ex) {
+                JOptionPane.showMessageDialog(dialog, actionErrorMessage(ex),
+                        "Restock not saved", JOptionPane.WARNING_MESSAGE);
+            }
+        });
+        dialog.setContentPane(content);
+        dialog.pack();
+        dialog.setMinimumSize(new Dimension(520, dialog.getHeight()));
+        dialog.setLocationRelativeTo(this);
+        dialog.setVisible(true);
+    }
+
     private JPanel cardPanel(BorderLayout layout) {
         JPanel panel = new JPanel(layout);
         panel.setBackground(WHITE);
@@ -1499,7 +1621,7 @@ public final class PharmacyAppFrame extends JFrame {
         return switch (screen) {
             case DASHBOARD -> "Actions are displayed from the recorded CSV history.";
             case PHARMACIST_HOME -> "Your workspace activity is read from the pharmacy CSV history.";
-            case COUNTER_SALE -> "Select a medicine to add it to the sale preview.";
+            case COUNTER_SALE -> "Build a sale from eligible stock, then save the transaction and stock updates.";
             case INVENTORY_ITEMS -> data.rows().size() + " catalog records · Search with the field above.";
             case STOCK_BATCHES -> "Sorted by earliest expiration date. Blocked batches remain visible.";
             case RESTOCK_REQUESTS -> "Receipt updates are read from the configured pharmacy records.";
@@ -1517,6 +1639,19 @@ public final class PharmacyAppFrame extends JFrame {
             return "The CSV data could not be read.";
         }
         return error.getMessage();
+    }
+
+    private String actionErrorMessage(Throwable error) {
+        Throwable cause = error;
+        while (cause != null && (cause.getMessage() == null || cause.getMessage().isBlank())) {
+            if (cause.getCause() == null) break;
+            cause = cause.getCause();
+        }
+        if (cause == null) return "The action could not be saved. Please try again.";
+        String message = cause.getMessage();
+        return message == null || message.isBlank()
+                ? "The action could not be saved (" + cause.getClass().getSimpleName() + "). Please try again."
+                : message;
     }
 
     private String escapeHtml(String value) {
@@ -1646,7 +1781,7 @@ public final class PharmacyAppFrame extends JFrame {
             } else if (status) {
                 setOpaque(true);
                 String normalized = text.toLowerCase();
-                if (normalized.equals("active") || normalized.equals("success")
+                if (normalized.equals("active") || normalized.equals("approved") || normalized.equals("success")
                         || normalized.equals("sellable") || normalized.equals("completed")
                         || normalized.equals("received") || normalized.equals("verified")
                         || normalized.equals("dispensed")) {
@@ -1684,4 +1819,8 @@ public final class PharmacyAppFrame extends JFrame {
             String type,
             int available,
             int quantity) { }
+
+    private record ItemOption(String itemID, String name) {
+        @Override public String toString() { return name + " · " + itemID; }
+    }
 }

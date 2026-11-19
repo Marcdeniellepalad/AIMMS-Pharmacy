@@ -6,6 +6,7 @@ Updated November 20, 2026. The workflow baseline is the [Notion Version 2 overvi
 
 - The product is a desktop pharmacy counter system.
 - Pharmacists are the sellers and process sales.
+- Administrators control pharmacist-submitted restock requests. Their approval action records the actual receipt details and adds a dated, lot-tracked batch to shared inventory.
 - Several workstations share stock, so stock-changing work needs one coordinated write path.
 - Prescriptions come from outside AIMMs; there is no internal doctor account or approval role.
 - Java and CSV files are the course direction for backend save and retrieve operations, and the project must demonstrate the four OOP pillars.
@@ -29,4 +30,4 @@ These are implementation proposals unless stated as accepted above. The current 
 - The exact CSV journal and recovery protocol.
 - Which prescription formats and medicine classes are accepted, and their validity/retention rules.
 - How original prescription documents are protected and retained.
-- Who approves restock requests and which balance/stock changes are allowed for a sale void.
+- Which balance/stock changes are allowed for a sale void.

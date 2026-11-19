@@ -4,6 +4,7 @@ import java.math.BigDecimal;
 import java.nio.file.Path;
 import java.time.LocalDate;
 import java.time.format.DateTimeFormatter;
+import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashMap;
@@ -16,7 +17,10 @@ import model.inventory.Batch;
 import model.inventory.BatchStatus;
 import model.inventory.Item;
 import model.inventory.ItemStatus;
+import model.inventory.RestockRequest;
+import model.inventory.RestockRequestStatus;
 import repository.csv.CsvFileManager;
+import repository.csv.CsvWriteCoordinator;
 import repository.inventory.BatchRepository;
 import repository.inventory.ItemRepository;
 
@@ -72,10 +76,23 @@ public final class PharmacyScreenService {
             "prescriptionDate", "dateReceived", "validUntil", "sourceType", "sourceReference", "status");
     private static final List<String> TRANSACTION_HEADERS = List.of(
             "transactionID", "customerID", "pharmacistID", "totalAmount", "status", "dateTime");
+    private static final List<String> TRANSACTION_ITEM_HEADERS = List.of(
+            "transactionItemID", "transactionID", "itemID", "batchID", "prescriptionItemID",
+            "quantity", "unitPrice", "subtotal");
+    private static final List<String> TRANSACTION_LOG_HEADERS = List.of(
+            "logID", "transactionID", "customerID", "actorID", "actorRole", "action", "dateTime",
+            "reason", "outcome", "relatedRecordID", "details");
+    private static final List<String> BATCH_LOG_HEADERS = List.of(
+            "logID", "batchID", "itemID", "actorID", "actorRole", "action", "dateTime", "reason",
+            "outcome", "relatedRecordID", "details");
+    private static final List<String> INVENTORY_LOG_HEADERS = List.of(
+            "logID", "batchID", "itemID", "actorID", "actorRole", "action", "quantity", "dateTime",
+            "reason", "outcome", "relatedRecordID", "details");
 
     private final ItemRepository itemRepository;
     private final BatchRepository batchRepository;
     private final CsvFileManager csvFileManager;
+    private final CsvWriteCoordinator writeCoordinator = new CsvWriteCoordinator();
     private static final Pattern ITEM_NUMBER = Pattern.compile(".*?(\\d+)$");
 
     public PharmacyScreenService() {
@@ -128,6 +145,226 @@ public final class PharmacyScreenService {
         String itemID = String.format("MED-%05d", nextNumber);
         itemRepository.save(new Item(itemID, name.trim(), category.trim(), price,
                 prescriptionRequired, status));
+    }
+
+    public record SaleLine(String itemID, int quantity) { }
+
+    /** Commits a local counter sale, stock deductions, and corresponding audit rows as one recoverable write. */
+    public String completeSale(String customerID, List<SaleLine> saleLines, String actorID, String actorRole) {
+        if (saleLines == null || saleLines.isEmpty()) throw new IllegalArgumentException("Add at least one medicine.");
+        if (actorID == null || actorID.isBlank() || actorRole == null || actorRole.isBlank())
+            throw new IllegalArgumentException("A signed-in staff member is required.");
+        List<Item> items = itemRepository.findAll();
+        Map<String, Item> byId = new HashMap<>();
+        items.forEach(item -> byId.put(item.getItemID(), item));
+        for (SaleLine line : saleLines) {
+            Item item = byId.get(line.itemID());
+            if (line.quantity() <= 0 || item == null || item.getStatus() != ItemStatus.ACTIVE)
+                throw new IllegalArgumentException("A sale item is invalid or inactive. Refresh the catalog and try again.");
+            if (item.isPrescriptionRequired())
+                throw new IllegalArgumentException("Prescription medicine cannot be sold until a verified prescription dispensing flow is connected.");
+        }
+        String customer = customerID == null || customerID.isBlank() ? "" : customerID.trim();
+        List<Map<String, String>> customers = read("data/runtime/accounts/customerDB.csv", CUSTOMER_HEADERS);
+        if (!customer.isEmpty() && customers.stream().noneMatch(row -> customer.equals(row.get("customerID"))
+                && "ACTIVE".equals(row.get("status")))) throw new IllegalArgumentException("Customer ID was not found or is inactive.");
+
+        List<Map<String, String>> batches = read("data/runtime/inventory/batchDB.csv", BATCH_HEADERS);
+        List<Map<String, String>> transactions = new ArrayList<>(read("data/runtime/transactions/transactionsDB.csv", TRANSACTION_HEADERS));
+        List<Map<String, String>> transactionItems = new ArrayList<>(read("data/runtime/transactions/transactionItemsDB.csv", TRANSACTION_ITEM_HEADERS));
+        List<Map<String, String>> transactionLogs = new ArrayList<>(read("data/runtime/logs/transactionLogs.csv", TRANSACTION_LOG_HEADERS));
+        List<Map<String, String>> batchLogs = new ArrayList<>(read("data/runtime/logs/batchLogs.csv", BATCH_LOG_HEADERS));
+        String transactionID = nextID(transactions, "transactionID", "TXN-");
+        String now = LocalDateTime.now().withNano(0).toString();
+        BigDecimal total = BigDecimal.ZERO;
+        List<Map<String, String>> changedBatches = new ArrayList<>(batches);
+        for (SaleLine line : saleLines) {
+            Item item = byId.get(line.itemID());
+            List<Map<String, String>> eligible = changedBatches.stream()
+                    .filter(row -> line.itemID().equals(row.get("itemID")))
+                    .filter(row -> "ACTIVE".equals(row.get("status")))
+                    .filter(row -> LocalDate.parse(row.get("expirationDate")).compareTo(LocalDate.now()) >= 0)
+                    .filter(row -> Integer.parseInt(row.get("quantity")) > 0)
+                    .sorted(Comparator.comparing(row -> row.get("expirationDate")))
+                    .toList();
+            int available = eligible.stream().mapToInt(row -> Integer.parseInt(row.get("quantity"))).sum();
+            if (available < line.quantity()) throw new IllegalArgumentException("Not enough eligible stock for " + item.getItemName() + ". Refresh and try again.");
+            int remaining = line.quantity();
+            for (Map<String, String> batch : eligible) {
+                if (remaining == 0) break;
+                int oldQuantity = Integer.parseInt(batch.get("quantity"));
+                int deducted = Math.min(oldQuantity, remaining);
+                remaining -= deducted;
+                Map<String, String> updated = new java.util.LinkedHashMap<>(batch);
+                updated.put("quantity", Integer.toString(oldQuantity - deducted));
+                if (oldQuantity == deducted) updated.put("status", "DEPLETED");
+                changedBatches.set(changedBatches.indexOf(batch), updated);
+                BigDecimal subtotal = item.getPrice().multiply(BigDecimal.valueOf(deducted));
+                total = total.add(subtotal);
+                transactionItems.add(row(TRANSACTION_ITEM_HEADERS,
+                        "transactionItemID", nextID(transactionItems, "transactionItemID", "TXI-"),
+                        "transactionID", transactionID, "itemID", item.getItemID(), "batchID", batch.get("batchID"),
+                        "prescriptionItemID", "", "quantity", Integer.toString(deducted),
+                        "unitPrice", item.getPrice().toPlainString(), "subtotal", subtotal.toPlainString()));
+                batchLogs.add(row(BATCH_LOG_HEADERS,
+                        "logID", nextID(batchLogs, "logID", "LOG-"), "batchID", batch.get("batchID"),
+                        "itemID", item.getItemID(), "actorID", actorID, "actorRole", actorRole,
+                        "action", "SALE_DEDUCTION", "dateTime", now, "reason", "Counter sale",
+                        "outcome", "SUCCESS", "relatedRecordID", transactionID,
+                        "details", "Deducted " + deducted + " unit(s) using FEFO."));
+            }
+        }
+        transactions.add(row(TRANSACTION_HEADERS,
+                "transactionID", transactionID, "customerID", customer, "pharmacistID", actorID,
+                "totalAmount", total.toPlainString(), "status", "COMPLETED", "dateTime", now));
+        transactionLogs.add(row(TRANSACTION_LOG_HEADERS,
+                "logID", nextID(transactionLogs, "logID", "LOG-"), "transactionID", transactionID,
+                "customerID", customer, "actorID", actorID, "actorRole", actorRole,
+                "action", "SALE_COMPLETED", "dateTime", now, "reason", "Counter sale",
+                "outcome", "SUCCESS", "relatedRecordID", transactionID, "details", "Sale persisted to local CSV storage."));
+        writeCoordinator.commit(List.of(
+                new CsvWriteCoordinator.Update(Path.of("data/runtime/inventory/batchDB.csv"), BATCH_HEADERS, changedBatches),
+                new CsvWriteCoordinator.Update(Path.of("data/runtime/transactions/transactionsDB.csv"), TRANSACTION_HEADERS, transactions),
+                new CsvWriteCoordinator.Update(Path.of("data/runtime/transactions/transactionItemsDB.csv"), TRANSACTION_ITEM_HEADERS, transactionItems),
+                new CsvWriteCoordinator.Update(Path.of("data/runtime/logs/batchLogs.csv"), BATCH_LOG_HEADERS, batchLogs),
+                new CsvWriteCoordinator.Update(Path.of("data/runtime/logs/transactionLogs.csv"), TRANSACTION_LOG_HEADERS, transactionLogs)));
+        return transactionID;
+    }
+
+    public String createRestockRequest(String itemID, int quantity, String reason, String pharmacistID) {
+        if (quantity <= 0) throw new IllegalArgumentException("Requested quantity must be greater than zero.");
+        if (itemRepository.findByID(itemID).filter(item -> item.getStatus() == ItemStatus.ACTIVE).isEmpty())
+            throw new IllegalArgumentException("Select an active medicine from the catalog.");
+        if (pharmacistID == null || pharmacistID.isBlank()) throw new IllegalArgumentException("A signed-in pharmacist is required.");
+        List<Map<String, String>> requests = new ArrayList<>(read("data/runtime/inventory/restockRequests.csv", RESTOCK_HEADERS));
+        String id = nextID(requests, "requestID", "RST-");
+        String now = LocalDate.now().toString();
+        requests.add(row(RESTOCK_HEADERS, "requestID", id, "itemID", itemID, "quantityRequested", Integer.toString(quantity),
+                "quantityReceived", "0", "requestedByPharmacistID", pharmacistID, "dateRequested", now,
+                "receivedByID", "", "dateReceived", "", "status", "REQUESTED", "details", reason == null ? "" : reason.trim()));
+        List<Map<String, String>> inventoryLogs = new ArrayList<>(read("data/runtime/logs/inventoryLogs.csv", INVENTORY_LOG_HEADERS));
+        inventoryLogs.add(row(INVENTORY_LOG_HEADERS,
+                "logID", nextID(inventoryLogs, "logID", "LOG-"), "batchID", "", "itemID", itemID,
+                "actorID", pharmacistID, "actorRole", "PHARMACIST", "action", "RESTOCK_REQUESTED",
+                "quantity", Integer.toString(quantity), "dateTime", LocalDateTime.now().withNano(0).toString(),
+                "reason", reason == null ? "" : reason.trim(), "outcome", "SUCCESS", "relatedRecordID", id,
+                "details", "Restock request saved."));
+        writeCoordinator.commit(List.of(
+                new CsvWriteCoordinator.Update(Path.of("data/runtime/inventory/restockRequests.csv"), RESTOCK_HEADERS, requests),
+                new CsvWriteCoordinator.Update(Path.of("data/runtime/logs/inventoryLogs.csv"), INVENTORY_LOG_HEADERS, inventoryLogs)));
+        return id;
+    }
+
+    /** Approves a pending request and records the physically received stock as a new batch. */
+    public String approveRestockRequest(String requestID, String adminID, int quantityReceived,
+            String lotNumber, LocalDate expirationDate) {
+        if (requestID == null || requestID.isBlank()) throw new IllegalArgumentException("Select a restock request first.");
+        if (adminID == null || adminID.isBlank()) throw new IllegalArgumentException("A signed-in administrator is required.");
+        if (lotNumber == null || lotNumber.isBlank()) throw new IllegalArgumentException("Supplier lot number is required.");
+        if (expirationDate == null || expirationDate.isBefore(LocalDate.now()))
+            throw new IllegalArgumentException("Enter an expiration date that is today or later.");
+        List<Map<String, String>> admins = read("data/runtime/accounts/adminDB.csv", ADMIN_HEADERS);
+        if (admins.stream().noneMatch(row -> adminID.equals(row.get("adminID")) && "ACTIVE".equals(row.get("status")))) {
+            throw new IllegalArgumentException("Only an active administrator can approve restock requests.");
+        }
+
+        List<Map<String, String>> requests = new ArrayList<>(read("data/runtime/inventory/restockRequests.csv", RESTOCK_HEADERS));
+        int requestIndex = -1;
+        for (int index = 0; index < requests.size(); index++) {
+            if (requestID.equals(requests.get(index).get("requestID"))) {
+                requestIndex = index;
+                break;
+            }
+        }
+        if (requestIndex < 0) throw new IllegalArgumentException("That restock request no longer exists. Refresh the list.");
+        Map<String, String> requestRow = new java.util.LinkedHashMap<>(requests.get(requestIndex));
+        RestockRequest request;
+        try {
+            String previousReceiver = requestRow.get("receivedByID");
+            String previousDate = requestRow.get("dateReceived");
+            request = new RestockRequest(
+                    requestID,
+                    requestRow.get("itemID"),
+                    Integer.parseInt(requestRow.get("quantityRequested")),
+                    Integer.parseInt(requestRow.get("quantityReceived")),
+                    requestRow.get("requestedByPharmacistID"),
+                    LocalDate.parse(requestRow.get("dateRequested")),
+                    previousReceiver == null || previousReceiver.isBlank() ? null : previousReceiver,
+                    previousDate == null || previousDate.isBlank() ? null : LocalDate.parse(previousDate),
+                    RestockRequestStatus.valueOf(requestRow.get("status")),
+                    requestRow.get("details"));
+        } catch (RuntimeException ex) {
+            throw new IllegalArgumentException("The selected restock request contains invalid data.", ex);
+        }
+        boolean approvingNow = request.getStatus() == RestockRequestStatus.REQUESTED;
+        if (approvingNow) request = request.approve();
+        if (request.getStatus() != RestockRequestStatus.APPROVED
+                && request.getStatus() != RestockRequestStatus.PARTIALLY_RECEIVED) {
+            throw new IllegalArgumentException("Only pending, approved, or partially received requests can receive stock.");
+        }
+        Item item = itemRepository.findByID(request.getItemID())
+                .filter(candidate -> candidate.getStatus() == ItemStatus.ACTIVE)
+                .orElseThrow(() -> new IllegalArgumentException("The requested medicine is missing or inactive."));
+        RestockRequest received = request.recordReceipt(quantityReceived, adminID, LocalDate.now());
+        String batchID;
+        List<Map<String, String>> batches = new ArrayList<>(read("data/runtime/inventory/batchDB.csv", BATCH_HEADERS));
+        batchID = nextID(batches, "batchID", "BAT-");
+        batches.add(row(BATCH_HEADERS,
+                "batchID", batchID,
+                "itemID", item.getItemID(),
+                "lotNumber", lotNumber.trim(),
+                "quantity", Integer.toString(quantityReceived),
+                "expirationDate", expirationDate.toString(),
+                "dateReceived", LocalDate.now().toString(),
+                "status", "ACTIVE"));
+        requestRow.put("quantityReceived", Integer.toString(received.getQuantityReceived()));
+        requestRow.put("receivedByID", adminID);
+        requestRow.put("dateReceived", received.getDateReceived().toString());
+        requestRow.put("status", received.getStatus().name());
+        requests.set(requestIndex, requestRow);
+
+        List<Map<String, String>> inventoryLogs = new ArrayList<>(read("data/runtime/logs/inventoryLogs.csv", INVENTORY_LOG_HEADERS));
+        String timestamp = LocalDateTime.now().withNano(0).toString();
+        if (approvingNow) {
+            inventoryLogs.add(row(INVENTORY_LOG_HEADERS,
+                    "logID", nextID(inventoryLogs, "logID", "LOG-"), "batchID", "", "itemID", item.getItemID(),
+                    "actorID", adminID, "actorRole", "ADMIN", "action", "RESTOCK_APPROVED",
+                    "quantity", Integer.toString(request.getQuantityRequested()), "dateTime", timestamp,
+                    "reason", "Administrator approval", "outcome", "SUCCESS", "relatedRecordID", requestID,
+                    "details", "Approved and recorded the received quantity as batch " + batchID + "."));
+        }
+        inventoryLogs.add(row(INVENTORY_LOG_HEADERS,
+                "logID", nextID(inventoryLogs, "logID", "LOG-"), "batchID", batchID, "itemID", item.getItemID(),
+                "actorID", adminID, "actorRole", "ADMIN", "action", "RESTOCK_RECEIVED",
+                "quantity", Integer.toString(quantityReceived), "dateTime", timestamp,
+                "reason", "Restock receipt", "outcome", "SUCCESS", "relatedRecordID", requestID,
+                "details", "Lot " + lotNumber.trim() + "; expires " + expirationDate + "."));
+        List<Map<String, String>> batchLogs = new ArrayList<>(read("data/runtime/logs/batchLogs.csv", BATCH_LOG_HEADERS));
+        batchLogs.add(row(BATCH_LOG_HEADERS,
+                "logID", nextID(batchLogs, "logID", "LOG-"), "batchID", batchID, "itemID", item.getItemID(),
+                "actorID", adminID, "actorRole", "ADMIN", "action", "CREATE", "dateTime", timestamp,
+                "reason", "Approved restock receipt", "outcome", "SUCCESS", "relatedRecordID", requestID,
+                "details", "Received " + quantityReceived + " unit(s); lot " + lotNumber.trim()
+                        + "; expiration " + expirationDate + "."));
+        writeCoordinator.commit(List.of(
+                new CsvWriteCoordinator.Update(Path.of("data/runtime/inventory/restockRequests.csv"), RESTOCK_HEADERS, requests),
+                new CsvWriteCoordinator.Update(Path.of("data/runtime/inventory/batchDB.csv"), BATCH_HEADERS, batches),
+                new CsvWriteCoordinator.Update(Path.of("data/runtime/logs/inventoryLogs.csv"), INVENTORY_LOG_HEADERS, inventoryLogs),
+                new CsvWriteCoordinator.Update(Path.of("data/runtime/logs/batchLogs.csv"), BATCH_LOG_HEADERS, batchLogs)));
+        return batchID;
+    }
+
+    private static String nextID(List<Map<String, String>> rows, String field, String prefix) {
+        int max = rows.stream().map(row -> row.get(field)).filter(java.util.Objects::nonNull)
+                .map(ITEM_NUMBER::matcher).filter(Matcher::matches).mapToInt(matcher -> Integer.parseInt(matcher.group(1))).max().orElse(0);
+        return String.format("%s%05d", prefix, max + 1);
+    }
+
+    private static Map<String, String> row(List<String> headers, String... keyValues) {
+        Map<String, String> result = new java.util.LinkedHashMap<>();
+        for (int index = 0; index < keyValues.length; index += 2) result.put(keyValues[index], keyValues[index + 1]);
+        if (!result.keySet().equals(new java.util.LinkedHashSet<>(headers))) throw new IllegalArgumentException("Incomplete CSV row.");
+        return result;
     }
 
     private ScreenData loadDashboard() {
@@ -420,7 +657,8 @@ public final class PharmacyScreenService {
     }
 
     private static boolean isOpenRestock(String status) {
-        return "REQUESTED".equals(status) || "PARTIALLY_RECEIVED".equals(status);
+        return "REQUESTED".equals(status) || "APPROVED".equals(status)
+                || "PARTIALLY_RECEIVED".equals(status);
     }
 
     private static String relatedRecord(Map<String, String> row) {

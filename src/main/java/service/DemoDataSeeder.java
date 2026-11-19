@@ -6,6 +6,8 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -91,7 +93,9 @@ public final class DemoDataSeeder {
                 markDemoData(marker);
                 return true;
             }
-            return false;
+            if (!hasOnlySampleInventory()) {
+                return false;
+            }
         }
 
         LocalDate today = LocalDate.now();
@@ -114,26 +118,9 @@ public final class DemoDataSeeder {
                 row("customerID", "CUS-00001", "username", "sample.customer", "passwordHash", customerPasswordHash,
                         "fullName", "Jordan Santos", "balance", "1250.00", "status", "ACTIVE",
                         "dateRegistered", today.minusDays(90).toString())));
-        write("data/runtime/inventory/itemsDB.csv", ITEM_HEADERS, List.of(
-                row("itemID", "MED-00001", "itemName", "Paracetamol 500 mg", "category", "Pain relief",
-                        "price", "8.50", "prescriptionRequired", "false", "status", "ACTIVE"),
-                row("itemID", "MED-00002", "itemName", "Amoxicillin 500 mg", "category", "Antibiotics",
-                        "price", "18.75", "prescriptionRequired", "true", "status", "ACTIVE"),
-                row("itemID", "MED-00003", "itemName", "Cetirizine 10 mg", "category", "Allergy",
-                        "price", "5.50", "prescriptionRequired", "false", "status", "ACTIVE"),
-                row("itemID", "MED-00004", "itemName", "Salbutamol inhaler", "category", "Respiratory",
-                        "price", "235.00", "prescriptionRequired", "true", "status", "ACTIVE"),
-                row("itemID", "MED-00005", "itemName", "Vitamin C 500 mg", "category", "Vitamins",
-                        "price", "4.50", "prescriptionRequired", "false", "status", "ACTIVE")));
-        write("data/runtime/inventory/batchDB.csv", BATCH_HEADERS, List.of(
-                batch("BAT-00001", "MED-00001", "PCM-24A", "240", today.plusDays(300), today.minusDays(15)),
-                batch("BAT-00002", "MED-00001", "PCM-24B", "80", today.plusDays(22), today.minusDays(4)),
-                batch("BAT-00003", "MED-00002", "AMX-91C", "96", today.plusDays(180), today.minusDays(20)),
-                batch("BAT-00004", "MED-00003", "CTZ-11B", "120", today.plusDays(260), today.minusDays(11)),
-                batch("BAT-00005", "MED-00004", "SLB-33D", "14", today.plusDays(210), today.minusDays(25)),
-                batch("BAT-00006", "MED-00005", "VTC-8XA", "0", today.plusDays(320), today.minusDays(45), "DEPLETED")));
+        seedInventoryFromSamples();
         write("data/runtime/inventory/restockRequests.csv", RESTOCK_HEADERS, List.of(
-                row("requestID", "RST-00001", "itemID", "MED-00002", "quantityRequested", "60",
+                row("requestID", "RST-00001", "itemID", "DEMO-ITEM-006", "quantityRequested", "60",
                         "quantityReceived", "0", "requestedByPharmacistID", "PHR-00001",
                         "dateRequested", today.minusDays(1).toString(), "receivedByID", "", "dateReceived", "",
                         "status", "REQUESTED", "details", "Amoxicillin stock is running low.")));
@@ -149,28 +136,28 @@ public final class DemoDataSeeder {
                         "validUntil", today.plusDays(17).toString(), "sourceType", "PAPER",
                         "sourceReference", "DEMO-RX-00002", "status", "NEEDS_CLARIFICATION")));
         write("data/runtime/prescriptions/prescriptionItemsDB.csv", PRESCRIPTION_ITEM_HEADERS, List.of(
-                row("prescriptionItemID", "RXI-00001", "prescriptionID", "RX-00001", "itemID", "MED-00002",
+                row("prescriptionItemID", "RXI-00001", "prescriptionID", "RX-00001", "itemID", "DEMO-ITEM-006",
                         "medicineName", "Amoxicillin", "strength", "500 mg", "dosageForm", "Capsule",
                         "directions", "Take one capsule three times daily", "quantityPrescribed", "21",
                         "quantityDispensed", "0")));
         String dateTime = now.toString();
         write("data/runtime/transactions/transactionsDB.csv", TRANSACTION_HEADERS, List.of(
                 row("transactionID", "TXN-00001", "customerID", "CUS-00001", "pharmacistID", "PHR-00001",
-                        "totalAmount", "25.50", "status", "COMPLETED", "dateTime", dateTime)));
+                        "totalAmount", "12.00", "status", "COMPLETED", "dateTime", dateTime)));
         write("data/runtime/transactions/transactionItemsDB.csv", TRANSACTION_ITEM_HEADERS, List.of(
-                row("transactionItemID", "TXI-00001", "transactionID", "TXN-00001", "itemID", "MED-00001",
-                        "batchID", "BAT-00001", "prescriptionItemID", "", "quantity", "3",
-                        "unitPrice", "8.50", "subtotal", "25.50")));
+                row("transactionItemID", "TXI-00001", "transactionID", "TXN-00001", "itemID", "DEMO-ITEM-001",
+                        "batchID", "DEMO-BATCH-001", "prescriptionItemID", "", "quantity", "3",
+                        "unitPrice", "4.00", "subtotal", "12.00")));
         write("data/runtime/logs/inventoryLogs.csv", INVENTORY_LOG_HEADERS, List.of(
-                row("logID", "LOG-00001", "batchID", "BAT-00001", "itemID", "MED-00001",
+                row("logID", "LOG-00001", "batchID", "DEMO-BATCH-001", "itemID", "DEMO-ITEM-001",
                         "actorID", "PHR-00001", "actorRole", "PHARMACIST", "action", "SALE_DISPENSED",
                         "quantity", "3", "dateTime", dateTime, "reason", "Counter sale",
                         "outcome", "SUCCESS", "relatedRecordID", "TXN-00001", "details", "Demo sale stock movement.")));
         write("data/runtime/logs/batchLogs.csv", BATCH_LOG_HEADERS, List.of(
-                row("logID", "LOG-00002", "batchID", "BAT-00002", "itemID", "MED-00001",
+                row("logID", "LOG-00002", "batchID", "DEMO-BATCH-002", "itemID", "DEMO-ITEM-002",
                         "actorID", "ADM-00001", "actorRole", "ADMIN", "action", "BATCH_RECEIVED",
                         "dateTime", now.minusDays(4).toString(), "reason", "Supplier delivery",
-                        "outcome", "SUCCESS", "relatedRecordID", "BAT-00002", "details", "Demo batch record.")));
+                        "outcome", "SUCCESS", "relatedRecordID", "DEMO-BATCH-002", "details", "Demo batch record.")));
         write("data/runtime/logs/prescriptionLogs.csv", PRESCRIPTION_LOG_HEADERS, List.of(
                 row("logID", "LOG-00003", "prescriptionID", "RX-00001", "actorID", "PHR-00001",
                         "actorRole", "PHARMACIST", "action", "PRESCRIPTION_RECEIVED", "dateTime", dateTime,
@@ -183,8 +170,8 @@ public final class DemoDataSeeder {
                         "relatedRecordID", "TXN-00001", "details", "Synthetic demo transaction.")));
         write("data/runtime/logs/balanceLogs.csv", BALANCE_LOG_HEADERS, List.of(
                 row("logID", "LOG-00005", "customerID", "CUS-00001", "actorID", "PHR-00001",
-                        "actorRole", "PHARMACIST", "action", "PURCHASE", "amount", "25.50",
-                        "balanceBefore", "1275.50", "balanceAfter", "1250.00", "dateTime", dateTime,
+                        "actorRole", "PHARMACIST", "action", "PURCHASE", "amount", "12.00",
+                        "balanceBefore", "1262.00", "balanceAfter", "1250.00", "dateTime", dateTime,
                         "reason", "Counter sale", "outcome", "SUCCESS", "relatedRecordID", "TXN-00001",
                         "details", "Synthetic demo balance change.")));
         markDemoData(marker);
@@ -199,6 +186,36 @@ public final class DemoDataSeeder {
                         && "AIMMs Administrator".equals(row.get("fullName")))
                 && pharmacists.stream().anyMatch(row -> "pharmacist".equals(row.get("username"))
                         && "Alex Rivera".equals(row.get("fullName")));
+    }
+
+    private boolean hasOnlySampleInventory() {
+        Path runtimeItems = Path.of("data/runtime/inventory/itemsDB.csv");
+        Path runtimeBatches = Path.of("data/runtime/inventory/batchDB.csv");
+        List<Map<String, String>> sampleItems = csv.readRecords(
+                Path.of("data/sample/inventory/itemsDB.csv"), ITEM_HEADERS);
+        List<Map<String, String>> sampleBatches = csv.readRecords(
+                Path.of("data/sample/inventory/batchDB.csv"), BATCH_HEADERS);
+        if (sampleItems.isEmpty() || sampleBatches.isEmpty()
+                || !sampleItems.equals(csv.readRecords(runtimeItems, ITEM_HEADERS))
+                || !sampleBatches.equals(csv.readRecords(runtimeBatches, BATCH_HEADERS))) {
+            return false;
+        }
+
+        List<PathAndHeaders> otherFiles = List.of(
+                file("data/runtime/accounts/adminDB.csv", ADMIN_HEADERS),
+                file("data/runtime/accounts/pharmacistDB.csv", PHARMACIST_HEADERS),
+                file("data/runtime/accounts/customerDB.csv", CUSTOMER_HEADERS),
+                file("data/runtime/inventory/restockRequests.csv", RESTOCK_HEADERS),
+                file("data/runtime/prescriptions/prescriptionsDB.csv", PRESCRIPTION_HEADERS),
+                file("data/runtime/prescriptions/prescriptionItemsDB.csv", PRESCRIPTION_ITEM_HEADERS),
+                file("data/runtime/transactions/transactionsDB.csv", TRANSACTION_HEADERS),
+                file("data/runtime/transactions/transactionItemsDB.csv", TRANSACTION_ITEM_HEADERS),
+                file("data/runtime/logs/inventoryLogs.csv", INVENTORY_LOG_HEADERS),
+                file("data/runtime/logs/batchLogs.csv", BATCH_LOG_HEADERS),
+                file("data/runtime/logs/prescriptionLogs.csv", PRESCRIPTION_LOG_HEADERS),
+                file("data/runtime/logs/transactionLogs.csv", TRANSACTION_LOG_HEADERS),
+                file("data/runtime/logs/balanceLogs.csv", BALANCE_LOG_HEADERS));
+        return otherFiles.stream().allMatch(file -> csv.readRecords(file.path(), file.headers()).isEmpty());
     }
 
     private static String newDemoPasswordHash() {
@@ -216,6 +233,27 @@ public final class DemoDataSeeder {
 
     private void write(String path, List<String> headers, List<Map<String, String>> records) {
         csv.writeRecords(Path.of(path), headers, records);
+    }
+
+    private void seedInventoryFromSamples() {
+        List<Map<String, String>> items = csv.readRecords(
+                Path.of("data/sample/inventory/itemsDB.csv"), ITEM_HEADERS);
+        List<Map<String, String>> batches = csv.readRecords(
+                Path.of("data/sample/inventory/batchDB.csv"), BATCH_HEADERS);
+        if (items.isEmpty() || batches.isEmpty()) {
+            throw new IllegalStateException("Synthetic sample inventory CSVs must contain starter records.");
+        }
+        List<Map<String, String>> demoBatches = new ArrayList<>(batches.size());
+        for (Map<String, String> batch : batches) {
+            Map<String, String> demoBatch = new LinkedHashMap<>(batch);
+            if ("DEMO-BATCH-001".equals(demoBatch.get("batchID"))) {
+                // The demo transaction below sells three units from this 48-unit starter batch.
+                demoBatch.put("quantity", "45");
+            }
+            demoBatches.add(demoBatch);
+        }
+        write("data/runtime/inventory/itemsDB.csv", ITEM_HEADERS, items);
+        write("data/runtime/inventory/batchDB.csv", BATCH_HEADERS, demoBatches);
     }
 
     private static PathAndHeaders file(String path, List<String> headers) {

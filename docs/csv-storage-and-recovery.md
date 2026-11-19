@@ -2,7 +2,7 @@
 
 CSV is the required save-and-retrieve format for this project. A CSV file does not provide database transactions or coordinate concurrent edits by itself.
 
-The repository code should read and write under `data/runtime/`. The tracked CSV files at the top-level data paths are schema templates, not live records. Prescription source documents must stay outside Git as well.
+The repository code should read and write under `data/runtime/`. The tracked CSV files at the top-level data paths are schema templates, not live records. Prescription source documents must stay outside Git as well. Runtime files, including local operation recovery folders and the writer lock, are ignored by Git.
 
 ## Inventory CSV repository API
 
@@ -33,7 +33,13 @@ Before enabling live sales, the CSV persistence layer must:
 5. On startup, detect an incomplete operation and finish or restore it before accepting new sales.
 6. Keep the original sale and report the recovery outcome in the audit log.
 
-The exact journal format and commit protocol are not implemented yet. Do not describe separate temp-file moves as a complete multi-file transaction.
+The local desktop application now has a recovery coordinator for counter-sale writes. It takes an OS file lock in `data/runtime/.writer.lock`, stages each updated CSV and its prior copy under the ignored `data/runtime/.operations/` directory, records a manifest, then replaces the affected files. On startup, an incomplete operation is rolled back from its staged prior copies; a marked completed operation is cleaned up. This protects local app instances sharing the same runtime folder from interleaved writes and recovers interrupted local operations.
+
+This is a local single-machine implementation. It does **not** coordinate separate PCs with separate runtime directories, replace a central service/shared data host, guarantee storage-device power-loss durability, or define conflict-resolution/backup policy. Team members must not treat per-PC runtime copies as one shared inventory. Multi-workstation deployment still requires the agreed central writer and hosting design.
+
+The recovery coordinator currently rolls back an interrupted operation but does not append a recovery-outcome audit event or offer an operator recovery report. That documented requirement remains open, so this path is suitable for controlled local testing and review, not production counter operation.
+
+Current persisted UI actions are OTC counter-sale completion (transaction, line items, FEFO batch deductions, transaction and batch audit rows), pharmacist restock-request submission, and administrator approval with receipt. The admin action records the received quantity and required lot/expiration, updates the request, creates a batch, and writes inventory and batch audit rows together. The system blocks prescription-only items at checkout until verified prescription selection and dispense recording are connected. Other account, prescription review/intake, balance, cancellation, and void workflows remain incomplete.
 
 ## Failure versus void
 

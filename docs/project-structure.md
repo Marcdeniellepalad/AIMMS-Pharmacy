@@ -7,6 +7,7 @@ AIMMs-Pharmacy/
 ├── data/
 │   ├── accounts/          Tracked CSV schema templates
 │   ├── inventory/         Tracked CSV schema templates
+│   ├── sample/inventory/  Synthetic startup catalog and batch records
 │   ├── logs/              Tracked CSV schema templates
 │   ├── prescriptions/     Tracked CSV schema templates
 │   ├── transactions/      Tracked CSV schema templates
@@ -27,4 +28,4 @@ AIMMs-Pharmacy/
 
 This structure follows the documented Controller → Service → Repository → CSV Manager flow. Keep folder names descriptive and avoid numbered package names. Maven and the Swing screen workspace are present. The full counter workflow and coordinated multi-file writes remain future implementation work. The workstation connection method still needs a team decision.
 
-The tracked `data/` CSV files contain headers only and act as schema templates. Application records belong under `data/runtime/`, never in those templates. Prescription source files must be stored outside Git.
+The tracked schema CSV files contain headers only and act as templates. Synthetic inventory seed records live under `data/sample/inventory/` and are copied to ignored runtime files on first startup. Demo mode can also seed other synthetic runtime records for screen review. Application records belong under `data/runtime/`, never in the schema templates. Prescription source files must be stored outside Git.

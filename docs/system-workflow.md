@@ -41,9 +41,9 @@ The Notion overview cites [RA 10918, Sections 33 and 37](https://elibrary.judici
 - Keep stock by product and physical batch, including lot number, quantity, and a required expiration date. Reject batches without an expiration date.
 - Use FEFO: select eligible stock with the earliest expiration first.
 - Expired, quarantined, pulled, depleted, or otherwise blocked batches are unavailable for sale.
-- A pharmacist can submit a restock request. Authorized staff record received stock and its batch details before it becomes available.
+- A pharmacist can submit a restock request. An administrator approves it and records the delivered quantity, supplier lot, and expiration date. The recorded receipt creates a batch and updates available stock; approval without receipt details does not add stock.
 
-FEFO is an AIMMs inventory policy, not a legal claim. Who approves a restock request remains an open team decision.
+FEFO is an AIMMs inventory policy, not a legal claim.
 
 ## Sale completion, cancellation, and voids
 
@@ -81,6 +81,5 @@ The service layer owns workflow rules. Repositories provide save and retrieve op
 
 - Which prescription formats and medicine classes AIMMs will accept under current rules.
 - Applicable validity and recordkeeping rules, especially for dangerous drugs.
-- Who approves restock requests and records receipt.
 - Which stock and balance adjustments are allowed for a completed-sale void.
 - How the submitted prescription document is stored and protected.
