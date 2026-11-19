@@ -26,7 +26,17 @@ The documented flow is:
 User → Controller → Service → Repository → CSV Manager → CSV files
 ```
 
-The Maven project currently includes a Swing dashboard prototype, domain models, and repository placeholders. The full counter workflow, CSV manager, and coordinated multi-file persistence are not implemented yet. See [project decisions](docs/decisions.md) for what is accepted, proposed, and still open.
+The Swing application has a staff sign-in screen, an administrator workspace, and a pharmacist counter workspace. Both workspaces cover their role's dashboard, inventory, batches, restocks, prescriptions, transactions, customers, and logs; administrator account review is limited to administrators. CSV-backed pages load in the background and show loading skeletons. The counter cart and restock form are previews until their coordinated workflow services are implemented. Catalog item creation uses `ItemRepository`. See [project decisions](docs/decisions.md) for what is accepted, proposed, and still open.
+
+### Run with synthetic demo records
+
+From the project folder, run `java -cp target/classes Main --demo`. This seeds the ignored `data/runtime/` folder only when its CSV files are empty, then opens the staff sign-in screen.
+
+- Admin: `admin`
+- Pharmacist: `pharmacist`
+- Password for both: `AIMMsDemo1!`
+
+All sample names, accounts, prescriptions, sales, and inventory records are synthetic. Existing runtime records are never overwritten by demo mode.
 
 ## Four OOP pillars
 

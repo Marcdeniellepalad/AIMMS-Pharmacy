@@ -14,7 +14,8 @@ AIMMs-Pharmacy/
 ├── docs/                  Workflow, schemas, and design notes
 └── src/
     ├── main/java/
-    │   ├── Main.java       Current Swing dashboard prototype
+    │   ├── Main.java       Application launcher
+    │   ├── ui/             Screen-based Swing workspace
     │   ├── controller/    User interaction and request coordination
     │   ├── model/         Accounts, inventory, prescriptions, sales, and logs
     │   ├── security/      Password hashing helpers
@@ -24,6 +25,6 @@ AIMMs-Pharmacy/
     └── test/java/         Automated tests
 ```
 
-This structure follows the documented Controller → Service → Repository → CSV Manager flow. Keep folder names descriptive and avoid numbered package names. Maven and a Swing dashboard prototype are present. The full counter workflow, CSV manager, and coordinated multi-file writes remain future implementation work. The UI toolkit and workstation connection method still need a team decision.
+This structure follows the documented Controller → Service → Repository → CSV Manager flow. Keep folder names descriptive and avoid numbered package names. Maven and the Swing screen workspace are present. The full counter workflow and coordinated multi-file writes remain future implementation work. The workstation connection method still needs a team decision.
 
 The tracked `data/` CSV files contain headers only and act as schema templates. Application records belong under `data/runtime/`, never in those templates. Prescription source files must be stored outside Git.
