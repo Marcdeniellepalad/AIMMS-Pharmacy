@@ -22,6 +22,8 @@ import model.inventory.ItemStatus;
 import model.inventory.RestockRequest;
 import model.inventory.RestockRequestStatus;
 import model.log.BalanceLogAction;
+import model.log.TransactionLogAction;
+import model.transaction.TransactionStatus;
 import repository.csv.CsvFileManager;
 import repository.csv.CsvWriteCoordinator;
 import repository.inventory.BatchRepository;
@@ -738,56 +740,256 @@ public final class PharmacyScreenService {
         return prescriptionID.trim() + " -> " + newStatus.toUpperCase();
     }
 
+    /**
+     * Cancels a completed sale as one recoverable write: refunds the paid total to the customer account,
+     * returns every sold unit to its original batch, and rolls prescription dispensing back so the
+     * medicine can be dispensed again. The transaction row stays in history marked CANCELLED.
+     */
     public String voidTransaction(String transactionID, String reason, String actorID, String actorRole) {
         if (transactionID == null || transactionID.isBlank()) {
             throw new IllegalArgumentException("Transaction ID is required.");
         }
         if (reason == null || reason.isBlank()) {
-            throw new IllegalArgumentException("A void reason is required for audit records.");
+            throw new IllegalArgumentException("A cancellation reason is required for the audit record.");
+        }
+        if (actorID == null || actorID.isBlank() || actorRole == null || actorRole.isBlank()) {
+            throw new IllegalArgumentException("A signed-in staff member is required.");
+        }
+        if (!"PHARMACIST".equals(actorRole) && !"ADMIN".equals(actorRole)) {
+            throw new IllegalArgumentException("Only pharmacists and administrators can cancel a sale.");
         }
 
+        String normalizedID = transactionID.trim();
         Path txnPath = Path.of("data/runtime/transactions/transactionsDB.csv");
         Path txnLogPath = Path.of("data/runtime/logs/transactionLogs.csv");
+        Path batchPath = Path.of("data/runtime/inventory/batchDB.csv");
+        Path batchLogPath = Path.of("data/runtime/logs/batchLogs.csv");
+        Path txnItemPath = Path.of("data/runtime/transactions/transactionItemsDB.csv");
 
-        List<Map<String, String>> transactions = new ArrayList<>(read("data/runtime/transactions/transactionsDB.csv", TRANSACTION_HEADERS));
-        List<Map<String, String>> txnLogs = new ArrayList<>(read("data/runtime/logs/transactionLogs.csv", TRANSACTION_LOG_HEADERS));
-
-        boolean found = false;
-        String customerID = "";
-        for (int i = 0; i < transactions.size(); i++) {
-            Map<String, String> row = new java.util.LinkedHashMap<>(transactions.get(i));
-            if (transactionID.trim().equals(row.get("transactionID"))) {
-                found = true;
-                if ("CANCELLED".equalsIgnoreCase(row.get("status"))) {
-                    throw new IllegalStateException("Transaction " + transactionID + " is already CANCELLED.");
-                }
-                row.put("status", "CANCELLED");
-                transactions.set(i, row);
+        List<Map<String, String>> transactions = new ArrayList<>(read(txnPath.toString(), TRANSACTION_HEADERS));
+        int txnIndex = -1;
+        for (int index = 0; index < transactions.size(); index++) {
+            if (normalizedID.equals(transactions.get(index).get("transactionID"))) {
+                txnIndex = index;
                 break;
             }
         }
-        if (!found) {
-            throw new IllegalArgumentException("Transaction not found: " + transactionID);
+        if (txnIndex < 0) {
+            throw new IllegalArgumentException("Transaction " + normalizedID + " was not found. Refresh the list.");
+        }
+        Map<String, String> txnRow = new java.util.LinkedHashMap<>(transactions.get(txnIndex));
+        if ("CANCELLED".equalsIgnoreCase(txnRow.getOrDefault("status", ""))) {
+            throw new IllegalStateException("Transaction " + normalizedID + " is already cancelled.");
+        }
+        BigDecimal total;
+        try {
+            total = parseMoney(txnRow.get("totalAmount"));
+        } catch (NumberFormatException ex) {
+            throw new IllegalArgumentException("Transaction " + normalizedID + " has an invalid stored total.");
+        }
+        String customerID = txnRow.getOrDefault("customerID", "").trim();
+        String now = LocalDateTime.now().withNano(0).toString();
+
+        List<Map<String, String>> soldItems = read(txnItemPath.toString(), TRANSACTION_ITEM_HEADERS).stream()
+                .filter(item -> normalizedID.equals(item.get("transactionID")))
+                .toList();
+        if (soldItems.isEmpty()) {
+            throw new IllegalArgumentException("Transaction " + normalizedID
+                    + " has no recorded items, so there is nothing to reverse.");
         }
 
+        // Return every sold unit to its original batch; expired, quarantined, and pulled batches keep their status.
+        List<Map<String, String>> batches = new ArrayList<>(read(batchPath.toString(), BATCH_HEADERS));
+        List<Map<String, String>> batchLogs = new ArrayList<>(read(batchLogPath.toString(), BATCH_LOG_HEADERS));
+        Map<String, Integer> returnedByRxItem = new java.util.LinkedHashMap<>();
+        int returnedUnits = 0;
+        for (Map<String, String> sold : soldItems) {
+            int soldQuantity;
+            try {
+                soldQuantity = Integer.parseInt(sold.getOrDefault("quantity", "0"));
+            } catch (NumberFormatException ex) {
+                throw new IllegalArgumentException("Transaction " + normalizedID + " has an invalid stored item quantity.");
+            }
+            if (soldQuantity <= 0) continue;
+            returnedUnits += soldQuantity;
+            String rxItemID = sold.getOrDefault("prescriptionItemID", "").trim();
+            if (!rxItemID.isEmpty()) returnedByRxItem.merge(rxItemID, soldQuantity, Integer::sum);
+
+            String batchID = sold.getOrDefault("batchID", "").trim();
+            int batchIndex = -1;
+            for (int index = 0; index < batches.size(); index++) {
+                if (batchID.equals(batches.get(index).get("batchID"))) {
+                    batchIndex = index;
+                    break;
+                }
+            }
+            if (batchIndex < 0) {
+                throw new IllegalArgumentException("Batch " + batchID + " behind " + normalizedID
+                        + " no longer exists, so the sale cannot be reversed safely.");
+            }
+            Map<String, String> batchRow = new java.util.LinkedHashMap<>(batches.get(batchIndex));
+            int restocked = Integer.parseInt(batchRow.getOrDefault("quantity", "0")) + soldQuantity;
+            batchRow.put("quantity", Integer.toString(restocked));
+            String batchStatus = batchRow.getOrDefault("status", BatchStatus.ACTIVE.name());
+            if (LocalDate.parse(batchRow.get("expirationDate")).isBefore(LocalDate.now())) {
+                batchRow.put("status", BatchStatus.EXPIRED.name());
+            } else if (BatchStatus.DEPLETED.name().equals(batchStatus) && restocked > 0) {
+                batchRow.put("status", BatchStatus.ACTIVE.name());
+            }
+            batches.set(batchIndex, batchRow);
+            batchLogs.add(row(BATCH_LOG_HEADERS,
+                    "logID", nextID(batchLogs, "logID", "LOG-"), "batchID", batchID,
+                    "itemID", sold.getOrDefault("itemID", ""), "actorID", actorID, "actorRole", actorRole,
+                    "action", "SALE_RETURN", "dateTime", now, "reason", "Cancelled sale " + normalizedID,
+                    "outcome", "SUCCESS", "relatedRecordID", normalizedID,
+                    "details", "Returned " + soldQuantity + " unit(s) to the batch; it now holds " + restocked + "."));
+        }
+
+        // Refund the paid total back to the customer account that was charged.
+        BigDecimal refunded = BigDecimal.ZERO;
+        List<Map<String, String>> customers = new ArrayList<>(
+                read("data/runtime/accounts/customerDB.csv", CUSTOMER_HEADERS));
+        List<Map<String, String>> balanceLogs = new ArrayList<>(
+                read("data/runtime/logs/balanceLogs.csv", BALANCE_LOG_HEADERS));
+        if (!customerID.isEmpty()) {
+            int customerIndex = -1;
+            for (int index = 0; index < customers.size(); index++) {
+                if (customerID.equals(customers.get(index).get("customerID"))) {
+                    customerIndex = index;
+                    break;
+                }
+            }
+            if (customerIndex < 0) {
+                throw new IllegalArgumentException("Customer account " + customerID + " behind " + normalizedID
+                        + " no longer exists, so the sale cannot be refunded.");
+            }
+            Map<String, String> customerRow = new java.util.LinkedHashMap<>(customers.get(customerIndex));
+            BigDecimal balanceBefore;
+            try {
+                balanceBefore = parseMoney(customerRow.get("balance"));
+            } catch (NumberFormatException ex) {
+                throw new IllegalArgumentException("The customer account has an invalid stored balance.");
+            }
+            refunded = total;
+            BigDecimal balanceAfter = balanceBefore.add(refunded);
+            customerRow.put("balance", balanceAfter.toPlainString());
+            customers.set(customerIndex, customerRow);
+            balanceLogs.add(row(BALANCE_LOG_HEADERS,
+                    "logID", nextID(balanceLogs, "logID", "LOG-"), "customerID", customerID,
+                    "actorID", actorID, "actorRole", actorRole,
+                    "action", BalanceLogAction.REFUND.name(), "amount", refunded.toPlainString(),
+                    "balanceBefore", balanceBefore.toPlainString(),
+                    "balanceAfter", balanceAfter.toPlainString(),
+                    "dateTime", now, "reason", reason.trim(), "outcome", "SUCCESS",
+                    "relatedRecordID", normalizedID,
+                    "details", "Refunded the cancelled sale total to the customer balance."));
+        }
+
+        // Roll prescription dispensing back so the remaining allowance becomes sellable again.
+        int rolledBackUnits = 0;
+        List<CsvWriteCoordinator.Update> rxUpdates = new ArrayList<>();
+        if (!returnedByRxItem.isEmpty()) {
+            List<Map<String, String>> rxItems = new ArrayList<>(read(
+                    "data/runtime/prescriptions/prescriptionItemsDB.csv", PRESCRIPTION_ITEM_HEADERS));
+            List<Map<String, String>> prescriptions = new ArrayList<>(read(
+                    "data/runtime/prescriptions/prescriptionsDB.csv", PRESCRIPTION_HEADERS));
+            List<Map<String, String>> rxLogs = new ArrayList<>(read(
+                    "data/runtime/logs/prescriptionLogs.csv", PRESCRIPTION_LOG_HEADERS));
+            java.util.Set<String> touchedPrescriptions = new java.util.LinkedHashSet<>();
+            for (Map.Entry<String, Integer> returned : returnedByRxItem.entrySet()) {
+                int rxItemIndex = -1;
+                for (int index = 0; index < rxItems.size(); index++) {
+                    if (returned.getKey().equals(rxItems.get(index).get("prescriptionItemID"))) {
+                        rxItemIndex = index;
+                        break;
+                    }
+                }
+                if (rxItemIndex < 0) {
+                    throw new IllegalArgumentException("Prescription item " + returned.getKey() + " behind "
+                            + normalizedID + " no longer exists, so the sale cannot be reversed safely.");
+                }
+                Map<String, String> rxItemRow = new java.util.LinkedHashMap<>(rxItems.get(rxItemIndex));
+                int dispensed = Math.max(0,
+                        Integer.parseInt(rxItemRow.getOrDefault("quantityDispensed", "0")) - returned.getValue());
+                rxItemRow.put("quantityDispensed", Integer.toString(dispensed));
+                rxItems.set(rxItemIndex, rxItemRow);
+                touchedPrescriptions.add(rxItemRow.get("prescriptionID"));
+                rolledBackUnits += returned.getValue();
+                rxLogs.add(row(PRESCRIPTION_LOG_HEADERS,
+                        "logID", nextID(rxLogs, "logID", "LOG-"), "prescriptionID", rxItemRow.get("prescriptionID"),
+                        "actorID", actorID, "actorRole", actorRole, "action", "DISPENSE_REVERSED",
+                        "dateTime", now, "reason", "Cancelled sale " + normalizedID, "outcome", "SUCCESS",
+                        "relatedRecordID", normalizedID,
+                        "details", "Rolled back " + returned.getValue() + " dispensed unit(s); "
+                                + Math.max(Integer.parseInt(rxItemRow.get("quantityPrescribed")) - dispensed, 0)
+                                + " unit(s) remain dispensable."));
+            }
+            for (String rxID : touchedPrescriptions) {
+                java.util.List<Map<String, String>> rxRows = rxItems.stream()
+                        .filter(item -> rxID.equals(item.get("prescriptionID")))
+                        .toList();
+                boolean fullyDispensed = rxRows.stream().allMatch(item ->
+                        Integer.parseInt(item.get("quantityDispensed"))
+                                >= Integer.parseInt(item.get("quantityPrescribed")));
+                int dispensedTotal = rxRows.stream()
+                        .mapToInt(item -> Integer.parseInt(item.get("quantityDispensed"))).sum();
+                for (int index = 0; index < prescriptions.size(); index++) {
+                    Map<String, String> prescriptionRow = prescriptions.get(index);
+                    if (!rxID.equals(prescriptionRow.get("prescriptionID"))) continue;
+                    String currentStatus = prescriptionRow.getOrDefault("status", "");
+                    if (!"DISPENSED".equals(currentStatus) && !"PARTIALLY_DISPENSED".equals(currentStatus)) continue;
+                    String newState = fullyDispensed ? "DISPENSED"
+                            : dispensedTotal > 0 ? "PARTIALLY_DISPENSED" : "VERIFIED";
+                    Map<String, String> updatedRow = new java.util.LinkedHashMap<>(prescriptionRow);
+                    updatedRow.put("status", newState);
+                    prescriptions.set(index, updatedRow);
+                    rxLogs.add(row(PRESCRIPTION_LOG_HEADERS,
+                            "logID", nextID(rxLogs, "logID", "LOG-"), "prescriptionID", rxID,
+                            "actorID", actorID, "actorRole", actorRole, "action", "DISPENSE_REVERSED",
+                            "dateTime", now, "reason", "Cancelled sale " + normalizedID, "outcome", "SUCCESS",
+                            "relatedRecordID", normalizedID,
+                            "details", "Prescription reverted to " + newState + " after the sale was cancelled."));
+                }
+            }
+            rxUpdates.add(new CsvWriteCoordinator.Update(
+                    Path.of("data/runtime/prescriptions/prescriptionItemsDB.csv"), PRESCRIPTION_ITEM_HEADERS, rxItems));
+            rxUpdates.add(new CsvWriteCoordinator.Update(
+                    Path.of("data/runtime/prescriptions/prescriptionsDB.csv"), PRESCRIPTION_HEADERS, prescriptions));
+            rxUpdates.add(new CsvWriteCoordinator.Update(
+                    Path.of("data/runtime/logs/prescriptionLogs.csv"), PRESCRIPTION_LOG_HEADERS, rxLogs));
+        }
+
+        txnRow.put("status", TransactionStatus.CANCELLED.name());
+        transactions.set(txnIndex, txnRow);
+        List<String> reversalParts = new ArrayList<>();
+        if (refunded.signum() > 0) reversalParts.add("refunded " + money(refunded) + " to " + customerID);
+        if (returnedUnits > 0) reversalParts.add(returnedUnits + " unit(s) returned to stock");
+        if (rolledBackUnits > 0) reversalParts.add(rolledBackUnits + " prescription unit(s) rolled back");
+        String reversalNote = reversalParts.isEmpty() ? ""
+                : "; " + String.join("; ", reversalParts);
+        List<Map<String, String>> txnLogs = new ArrayList<>(read(txnLogPath.toString(), TRANSACTION_LOG_HEADERS));
         txnLogs.add(row(TRANSACTION_LOG_HEADERS,
-                "logID", nextID(txnLogs, "logID", "LOG-"),
-                "transactionID", transactionID.trim(),
-                "customerID", customerID,
-                "actorID", actorID,
-                "actorRole", actorRole,
-                "action", "VOID_REVERSED",
-                "dateTime", LocalDateTime.now().withNano(0).toString(),
-                "reason", reason.trim(),
-                "outcome", "SUCCESS",
-                "relatedRecordID", transactionID.trim(),
-                "details", "Sale voided; original transaction preserved as CANCELLED"));
+                "logID", nextID(txnLogs, "logID", "LOG-"), "transactionID", normalizedID,
+                "customerID", customerID, "actorID", actorID, "actorRole", actorRole,
+                "action", TransactionLogAction.CANCELLED.name(), "dateTime", now,
+                "reason", reason.trim(), "outcome", "SUCCESS", "relatedRecordID", normalizedID,
+                "details", "Cancelled sale reversed" + reversalNote + "."));
 
-        writeCoordinator.commit(List.of(
-                new CsvWriteCoordinator.Update(txnPath, TRANSACTION_HEADERS, transactions),
-                new CsvWriteCoordinator.Update(txnLogPath, TRANSACTION_LOG_HEADERS, txnLogs)));
+        List<CsvWriteCoordinator.Update> updates = new ArrayList<>();
+        updates.add(new CsvWriteCoordinator.Update(batchPath, BATCH_HEADERS, batches));
+        updates.add(new CsvWriteCoordinator.Update(txnPath, TRANSACTION_HEADERS, transactions));
+        updates.add(new CsvWriteCoordinator.Update(batchLogPath, BATCH_LOG_HEADERS, batchLogs));
+        updates.add(new CsvWriteCoordinator.Update(txnLogPath, TRANSACTION_LOG_HEADERS, txnLogs));
+        if (refunded.signum() > 0) {
+            updates.add(new CsvWriteCoordinator.Update(
+                    Path.of("data/runtime/accounts/customerDB.csv"), CUSTOMER_HEADERS, customers));
+            updates.add(new CsvWriteCoordinator.Update(
+                    Path.of("data/runtime/logs/balanceLogs.csv"), BALANCE_LOG_HEADERS, balanceLogs));
+        }
+        updates.addAll(rxUpdates);
+        writeCoordinator.commit(updates);
 
-        return transactionID.trim();
+        return normalizedID + " was cancelled" + reversalNote + ".";
     }
 
     public String approvePharmacist(String pharmacistID, String adminID) {
@@ -1172,10 +1374,12 @@ public final class PharmacyScreenService {
                         money(parseMoney(row.get("totalAmount"))), displayStatus(row.get("status")), safe(row.get("dateTime"))))
                 .toList();
         long completed = records.stream().filter(row -> "COMPLETED".equals(row.get("status"))).count();
+        long cancelled = records.stream().filter(row -> "CANCELLED".equals(row.get("status"))).count();
         return new ScreenData(
                 List.of("TRANSACTION", "CUSTOMER", "PHARMACIST", "TOTAL", "STATUS", "DATE & TIME"), rows,
                 List.of(new Metric("TRANSACTIONS", Integer.toString(records.size()), "all records"),
-                        new Metric("COMPLETED", Long.toString(completed), "preserved in history")),
+                        new Metric("COMPLETED", Long.toString(completed), "preserved in history"),
+                        new Metric("CANCELLED", Long.toString(cancelled), "refunded and restocked")),
                 "No transactions yet",
                 "Completed and cancelled transactions will appear here.");
     }

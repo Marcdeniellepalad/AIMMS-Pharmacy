@@ -1679,22 +1679,30 @@ public final class PharmacyAppFrame extends JFrame {
         int modelRow = currentTable.convertRowIndexToModel(currentTable.getSelectedRow());
         List<String> row = currentData.rows().get(modelRow);
         String txnID = row.get(0);
+        String status = row.size() > 4 ? row.get(4).trim() : "";
+        if (!"Completed".equalsIgnoreCase(status)) {
+            JOptionPane.showMessageDialog(this,
+                    "Only completed sales can be voided. " + txnID + " is already " + status + ".",
+                    "Void unavailable", JOptionPane.INFORMATION_MESSAGE);
+            return;
+        }
 
         String reason = JOptionPane.showInputDialog(this,
-                "Enter reason for voiding " + txnID + " (records a reversal outcome):",
-                "Void Transaction",
-                JOptionPane.WARNING_MESSAGE);
-        if (reason != null && !reason.isBlank() && currentUser != null) {
-            try {
-                controller.voidTransaction(txnID, reason, currentUser.userID(), currentUser.role().name());
-                JOptionPane.showMessageDialog(this,
-                        "Transaction " + txnID + " marked CANCELLED and logged as VOID_REVERSED.",
-                        "Sale Voided", JOptionPane.INFORMATION_MESSAGE);
-                openScreen(Screen.TRANSACTIONS);
-            } catch (RuntimeException ex) {
-                JOptionPane.showMessageDialog(this, actionErrorMessage(ex),
-                        "Void Failed", JOptionPane.WARNING_MESSAGE);
-            }
+                "Cancel " + txnID + "? The paid total is refunded to the customer, every unit returns\n"
+                        + "to its batch, and prescription dispensing is rolled back.\n\n"
+                        + "Reason for the audit record:",
+                "Void transaction", JOptionPane.WARNING_MESSAGE);
+        if (reason == null || reason.isBlank() || currentUser == null) {
+            return;
+        }
+        try {
+            String summary = controller.voidTransaction(txnID, reason, currentUser.userID(), currentUser.role().name());
+            JOptionPane.showMessageDialog(this, summary,
+                    "Sale cancelled", JOptionPane.INFORMATION_MESSAGE);
+            openScreen(Screen.TRANSACTIONS);
+        } catch (RuntimeException ex) {
+            JOptionPane.showMessageDialog(this, actionErrorMessage(ex),
+                    "Void failed", JOptionPane.WARNING_MESSAGE);
         }
     }
 
@@ -2390,7 +2398,7 @@ public final class PharmacyAppFrame extends JFrame {
             case STOCK_BATCHES -> "Track lot numbers, expiration dates, and sellable quantity using FEFO.";
             case RESTOCK_REQUESTS -> "Follow requested quantities and receipt status.";
             case PRESCRIPTIONS -> "Review prescription records received from external prescribers.";
-            case TRANSACTIONS -> "Review completed and cancelled sales without changing their history.";
+            case TRANSACTIONS -> "Review sales; cancelling one refunds the customer and returns the items to stock.";
             case CUSTOMERS -> "View customer account records without exposing password data.";
             case PHARMACISTS -> "Review account status and administrator approval dates.";
             case ADMINS -> "View administrator accounts set up for this pharmacy.";
@@ -2424,7 +2432,7 @@ public final class PharmacyAppFrame extends JFrame {
             case STOCK_BATCHES -> "Sorted by earliest expiration date. Blocked batches remain visible.";
             case RESTOCK_REQUESTS -> "Receipt updates are read from the configured pharmacy records.";
             case PRESCRIPTIONS -> "Prescription source documents are not displayed or stored in the repository.";
-            case TRANSACTIONS -> "Completed transactions remain preserved in the history.";
+            case TRANSACTIONS -> "Cancelled sales stay in history with their refund and restock trail.";
             case CUSTOMERS -> "Account balances are current values; balance history appears in audit logs.";
             case PHARMACISTS -> "Pending accounts remain visible until their status is updated.";
             case ADMINS -> "Admin accounts are created through the manual setup process.";

@@ -19,7 +19,6 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.LocalDate;
 import java.util.ArrayList;
-import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
@@ -96,24 +95,166 @@ class PharmacySystemTest {
     }
 
     @Test
-    void testVoidTransactionPreservesRecordAsCancelled() {
+    void testVoidedSaleRefundsBalanceRestocksStockAndRollsBackPrescription() {
         PharmacyScreenService service = new PharmacyScreenService();
-        var saleRows = service.load(PharmacyScreenService.Screen.COUNTER_SALE).rows();
-        String activeItemID = saleRows.stream()
-                .filter(r -> Integer.parseInt(r.get(3)) > 0 && !r.toString().toLowerCase().contains("rx") && !r.toString().toLowerCase().contains("prescription"))
-                .map(r -> r.get(2))
-                .findFirst()
-                .orElseThrow();
+        CsvFileManager csv = new CsvFileManager();
+        List<String> customerHeaders = List.of("customerID", "username", "passwordHash",
+                "fullName", "balance", "status", "dateRegistered");
+        List<String> batchHeaders = List.of("batchID", "itemID", "lotNumber", "quantity",
+                "expirationDate", "dateReceived", "status");
+        List<String> txnHeaders = List.of("transactionID", "customerID", "pharmacistID",
+                "totalAmount", "status", "dateTime");
+        List<String> txnItemHeaders = List.of("transactionItemID", "transactionID", "itemID", "batchID",
+                "prescriptionItemID", "quantity", "unitPrice", "subtotal");
+        List<String> rxHeaders = List.of("prescriptionID", "customerID", "patientName", "prescriberName",
+                "prescriberLicenseNumber", "prescriptionDate", "dateReceived", "validUntil", "sourceType",
+                "sourceReference", "status");
+        List<String> rxItemHeaders = List.of("prescriptionItemID", "prescriptionID", "itemID", "medicineName",
+                "strength", "dosageForm", "directions", "quantityPrescribed", "quantityDispensed");
 
-        var lines = List.of(new PharmacyScreenService.SaleLine(activeItemID, 1));
-        String txnId = service.completeSale("CUS-00001", lines, "PHR-00001", "PHARMACIST");
-        assertNotNull(txnId);
+        String customerID = service.registerCustomer(
+                "void.case", "CounterPass1!".toCharArray(), "Void Case");
+        service.topUpCustomerBalance(customerID, new BigDecimal("500.00"), "PHR-00001", "PHARMACIST");
+        String rxID = service.registerPrescription(customerID, "Void Case", "Dr. Iris Chan", "PRC-998877",
+                LocalDate.now(), LocalDate.now().plusDays(14), "",
+                List.of(new PharmacyScreenService.PrescriptionLine("DEMO-ITEM-008", 5, "")),
+                "PHR-00001", "PHARMACIST");
+        service.reviewPrescription(rxID, "VERIFIED", "License confirmed", "PHR-00001", "PHARMACIST");
+        String rxItemID = csv.readRecords(
+                        Path.of("data/runtime/prescriptions/prescriptionItemsDB.csv"), rxItemHeaders).stream()
+                .filter(row -> rxID.equals(row.get("prescriptionID"))).findFirst().orElseThrow()
+                .get("prescriptionItemID");
 
-        String voidedId = service.voidTransaction(txnId, "Customer returned unopened item", "PHR-00001", "PHARMACIST");
-        assertEquals(txnId, voidedId);
+        String txnID = service.completeSale(customerID,
+                List.of(new PharmacyScreenService.SaleLine("DEMO-ITEM-008", 2, rxItemID)),
+                "PHR-00001", "PHARMACIST");
+        Map<String, String> soldItem = csv.readRecords(
+                        Path.of("data/runtime/transactions/transactionItemsDB.csv"), txnItemHeaders).stream()
+                .filter(row -> txnID.equals(row.get("transactionID"))).findFirst().orElseThrow();
+        String batchID = soldItem.get("batchID");
+        int batchQuantityAfterSale = Integer.parseInt(csv.readRecords(
+                        Path.of("data/runtime/inventory/batchDB.csv"), batchHeaders).stream()
+                .filter(row -> batchID.equals(row.get("batchID"))).findFirst().orElseThrow()
+                .get("quantity"));
+        BigDecimal balanceAfterSale = new BigDecimal(csv.readRecords(
+                        Path.of("data/runtime/accounts/customerDB.csv"), customerHeaders).stream()
+                .filter(row -> customerID.equals(row.get("customerID"))).findFirst().orElseThrow()
+                .get("balance"));
+        BigDecimal saleTotal = new BigDecimal(csv.readRecords(
+                        Path.of("data/runtime/transactions/transactionsDB.csv"), txnHeaders).stream()
+                .filter(row -> txnID.equals(row.get("transactionID"))).findFirst().orElseThrow()
+                .get("totalAmount"));
+        assertEquals("PARTIALLY_DISPENSED", csv.readRecords(
+                        Path.of("data/runtime/prescriptions/prescriptionsDB.csv"), rxHeaders).stream()
+                .filter(row -> rxID.equals(row.get("prescriptionID"))).findFirst().orElseThrow()
+                .get("status"));
+
+        String result = service.voidTransaction(txnID, "Customer returned the sealed box", "PHR-00001", "PHARMACIST");
+        assertTrue(result.contains("cancelled"));
+
+        assertEquals("CANCELLED", csv.readRecords(
+                        Path.of("data/runtime/transactions/transactionsDB.csv"), txnHeaders).stream()
+                .filter(row -> txnID.equals(row.get("transactionID"))).findFirst().orElseThrow()
+                .get("status"));
+        BigDecimal balanceAfterVoid = new BigDecimal(csv.readRecords(
+                        Path.of("data/runtime/accounts/customerDB.csv"), customerHeaders).stream()
+                .filter(row -> customerID.equals(row.get("customerID"))).findFirst().orElseThrow()
+                .get("balance"));
+        assertEquals(0, balanceAfterSale.add(saleTotal).compareTo(balanceAfterVoid));
+        int batchQuantityAfterVoid = Integer.parseInt(csv.readRecords(
+                        Path.of("data/runtime/inventory/batchDB.csv"), batchHeaders).stream()
+                .filter(row -> batchID.equals(row.get("batchID"))).findFirst().orElseThrow()
+                .get("quantity"));
+        assertEquals(batchQuantityAfterSale + 2, batchQuantityAfterVoid);
+        assertEquals("0", csv.readRecords(
+                        Path.of("data/runtime/prescriptions/prescriptionItemsDB.csv"), rxItemHeaders).stream()
+                .filter(row -> rxItemID.equals(row.get("prescriptionItemID"))).findFirst().orElseThrow()
+                .get("quantityDispensed"));
+        assertEquals("VERIFIED", csv.readRecords(
+                        Path.of("data/runtime/prescriptions/prescriptionsDB.csv"), rxHeaders).stream()
+                .filter(row -> rxID.equals(row.get("prescriptionID"))).findFirst().orElseThrow()
+                .get("status"));
+
+        Map<String, String> refundLog = csv.readRecords(
+                        Path.of("data/runtime/logs/balanceLogs.csv"),
+                        List.of("logID", "customerID", "actorID", "actorRole", "action", "amount",
+                                "balanceBefore", "balanceAfter", "dateTime", "reason", "outcome",
+                                "relatedRecordID", "details")).stream()
+                .filter(row -> "REFUND".equals(row.get("action")) && txnID.equals(row.get("relatedRecordID")))
+                .findFirst().orElseThrow();
+        assertEquals(customerID, refundLog.get("customerID"));
+        assertEquals(0, saleTotal.compareTo(new BigDecimal(refundLog.get("amount"))));
+        assertTrue(csv.readRecords(
+                        Path.of("data/runtime/logs/transactionLogs.csv"),
+                        List.of("logID", "transactionID", "customerID", "actorID", "actorRole", "action",
+                                "dateTime", "reason", "outcome", "relatedRecordID", "details")).stream()
+                .anyMatch(row -> txnID.equals(row.get("transactionID")) && "CANCELLED".equals(row.get("action"))));
+        assertTrue(csv.readRecords(
+                        Path.of("data/runtime/logs/batchLogs.csv"),
+                        List.of("logID", "batchID", "itemID", "actorID", "actorRole", "action", "dateTime",
+                                "reason", "outcome", "relatedRecordID", "details")).stream()
+                .anyMatch(row -> batchID.equals(row.get("batchID")) && "SALE_RETURN".equals(row.get("action"))
+                        && txnID.equals(row.get("relatedRecordID"))));
 
         assertThrows(IllegalStateException.class, () ->
-                service.voidTransaction(txnId, "Duplicate void attempt", "PHR-00001", "PHARMACIST"));
+                service.voidTransaction(txnID, "Duplicate cancellation attempt", "PHR-00001", "PHARMACIST"));
+    }
+
+    @Test
+    void testVoidTransactionRejectsBadInputAndUnknownRecords() {
+        PharmacyScreenService service = new PharmacyScreenService();
+        assertThrows(IllegalArgumentException.class, () ->
+                service.voidTransaction("TXN-00001", "   ", "PHR-00001", "PHARMACIST"));
+        assertThrows(IllegalArgumentException.class, () ->
+                service.voidTransaction("TXN-99999", "No such sale", "PHR-00001", "PHARMACIST"));
+        assertThrows(IllegalArgumentException.class, () ->
+                service.voidTransaction("TXN-00001", "Wrong actor role", "CUS-00001", "CUSTOMER"));
+    }
+
+    @Test
+    void testVoidedOverTheCounterSaleRefundsAndRestocksWithoutTouchingPrescriptions() {
+        PharmacyScreenService service = new PharmacyScreenService();
+        CsvFileManager csv = new CsvFileManager();
+        List<String> customerHeaders = List.of("customerID", "username", "passwordHash",
+                "fullName", "balance", "status", "dateRegistered");
+        List<String> batchHeaders = List.of("batchID", "itemID", "lotNumber", "quantity",
+                "expirationDate", "dateReceived", "status");
+
+        String customerID = service.registerCustomer(
+                "otc.void", "CounterPass1!".toCharArray(), "Otc Void");
+        service.topUpCustomerBalance(customerID, new BigDecimal("200.00"), "PHR-00001", "PHARMACIST");
+        String txnID = service.completeSale(customerID,
+                List.of(new PharmacyScreenService.SaleLine("DEMO-ITEM-002", 2)), "PHR-00001", "PHARMACIST");
+        String batchID = csv.readRecords(
+                        Path.of("data/runtime/transactions/transactionItemsDB.csv"),
+                        List.of("transactionItemID", "transactionID", "itemID", "batchID", "prescriptionItemID",
+                                "quantity", "unitPrice", "subtotal")).stream()
+                .filter(row -> txnID.equals(row.get("transactionID"))).findFirst().orElseThrow()
+                .get("batchID");
+        int batchQuantityAfterSale = Integer.parseInt(csv.readRecords(
+                        Path.of("data/runtime/inventory/batchDB.csv"), batchHeaders).stream()
+                .filter(row -> batchID.equals(row.get("batchID"))).findFirst().orElseThrow()
+                .get("quantity"));
+        BigDecimal balanceAfterSale = new BigDecimal(csv.readRecords(
+                        Path.of("data/runtime/accounts/customerDB.csv"), customerHeaders).stream()
+                .filter(row -> customerID.equals(row.get("customerID"))).findFirst().orElseThrow()
+                .get("balance"));
+
+        String result = service.voidTransaction(txnID, "Ring-up mistake at the counter", "PHR-00001", "PHARMACIST");
+        assertTrue(result.contains("cancelled"));
+        assertTrue(result.contains("returned to stock"));
+        assertFalse(result.contains("prescription"));
+
+        int batchQuantityAfterVoid = Integer.parseInt(csv.readRecords(
+                        Path.of("data/runtime/inventory/batchDB.csv"), batchHeaders).stream()
+                .filter(row -> batchID.equals(row.get("batchID"))).findFirst().orElseThrow()
+                .get("quantity"));
+        assertEquals(batchQuantityAfterSale + 2, batchQuantityAfterVoid);
+        BigDecimal balanceAfterVoid = new BigDecimal(csv.readRecords(
+                        Path.of("data/runtime/accounts/customerDB.csv"), customerHeaders).stream()
+                .filter(row -> customerID.equals(row.get("customerID"))).findFirst().orElseThrow()
+                .get("balance"));
+        assertTrue(balanceAfterVoid.compareTo(balanceAfterSale) > 0);
     }
 
     @Test
