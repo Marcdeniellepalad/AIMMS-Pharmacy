@@ -1,23 +1,31 @@
 package service;
 
-import java.nio.file.Path;
-import java.util.List;
-import java.util.Map;
 import java.util.Arrays;
+import java.util.Optional;
 
+import model.account.Admin;
+import model.account.AdminStatus;
+import model.account.Pharmacist;
+import model.account.StaffStatus;
 import model.account.UserRole;
-import repository.csv.CsvFileManager;
+import repository.account.AdminRepository;
+import repository.account.PharmacistRepository;
 import security.PasswordHasher;
 
-/** Authenticates staff accounts stored in the configured CSV workspace. */
+/** Authenticates staff accounts through the admin and pharmacist repositories. */
 public final class AuthenticationService {
 
-    private static final List<String> ADMIN_HEADERS = List.of(
-            "adminID", "username", "passwordHash", "fullName", "status", "dateCreated");
-    private static final List<String> PHARMACIST_HEADERS = List.of(
-            "pharmacistID", "username", "passwordHash", "fullName", "status", "dateRegistered", "dateApproved");
+    private final AdminRepository adminRepository;
+    private final PharmacistRepository pharmacistRepository;
 
-    private final CsvFileManager csvFileManager = new CsvFileManager();
+    public AuthenticationService() {
+        this(new AdminRepository(), new PharmacistRepository());
+    }
+
+    AuthenticationService(AdminRepository adminRepository, PharmacistRepository pharmacistRepository) {
+        this.adminRepository = adminRepository;
+        this.pharmacistRepository = pharmacistRepository;
+    }
 
     public UserSession authenticate(String username, char[] password) {
         if (password == null) {
@@ -29,37 +37,33 @@ public final class AuthenticationService {
                 throw invalidCredentials();
             }
 
-            for (Map<String, String> account : read("data/runtime/accounts/adminDB.csv", ADMIN_HEADERS)) {
-                if (normalized.equalsIgnoreCase(account.get("username"))
-                        && PasswordHasher.verify(password.clone(), account.get("passwordHash"))) {
-                    if (!"ACTIVE".equals(account.get("status"))) {
-                        throw new AuthenticationException("This administrator account is inactive.");
-                    }
-                    return new UserSession(account.get("adminID"), account.get("username"),
-                            account.get("fullName"), UserRole.ADMIN);
+            Optional<Admin> admin = adminRepository.findByUsername(normalized)
+                    .filter(account -> PasswordHasher.verify(password.clone(), account.getPasswordHash()));
+            if (admin.isPresent()) {
+                Admin account = admin.get();
+                if (account.getStatus() != AdminStatus.ACTIVE) {
+                    throw new AuthenticationException("This administrator account is inactive.");
                 }
+                return new UserSession(account.getUserID(), account.getUsername(),
+                        account.getFullName(), UserRole.ADMIN);
             }
 
-            for (Map<String, String> account : read("data/runtime/accounts/pharmacistDB.csv", PHARMACIST_HEADERS)) {
-                if (normalized.equalsIgnoreCase(account.get("username"))
-                        && PasswordHasher.verify(password.clone(), account.get("passwordHash"))) {
-                    if (!"ACTIVE".equals(account.get("status"))) {
-                        throw new AuthenticationException("REJECTED".equals(account.get("status"))
-                                ? "This pharmacist application was not approved."
-                                : "Your pharmacist account is awaiting administrator approval.");
-                    }
-                    return new UserSession(account.get("pharmacistID"), account.get("username"),
-                            account.get("fullName"), UserRole.PHARMACIST);
+            Optional<Pharmacist> pharmacist = pharmacistRepository.findByUsername(normalized)
+                    .filter(account -> PasswordHasher.verify(password.clone(), account.getPasswordHash()));
+            if (pharmacist.isPresent()) {
+                Pharmacist account = pharmacist.get();
+                if (account.getStatus() == StaffStatus.ACTIVE) {
+                    return new UserSession(account.getUserID(), account.getUsername(),
+                            account.getFullName(), UserRole.PHARMACIST);
                 }
+                throw new AuthenticationException(account.getStatus() == StaffStatus.REJECTED
+                        ? "This pharmacist application was not approved."
+                        : "Your pharmacist account is awaiting administrator approval.");
             }
             throw invalidCredentials();
         } finally {
             Arrays.fill(password, '\0');
         }
-    }
-
-    private List<Map<String, String>> read(String path, List<String> headers) {
-        return csvFileManager.readRecords(Path.of(path), headers);
     }
 
     private static AuthenticationException invalidCredentials() {
