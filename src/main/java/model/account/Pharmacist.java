@@ -2,6 +2,7 @@ package model.account;
 
 import java.time.LocalDate;
 
+// INHERITANCE: Pharmacist reuses User's common account state and adds staff approval dates/status.
 public class Pharmacist extends User {
 
     private final StaffStatus status;
@@ -35,6 +36,7 @@ public class Pharmacist extends User {
     }
 
     @Override
+    // POLYMORPHISM: the shared role method returns the role specific to Pharmacist.
     public UserRole getRole() {
         return UserRole.PHARMACIST;
     }

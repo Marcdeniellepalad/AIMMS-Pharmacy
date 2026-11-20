@@ -1096,6 +1096,8 @@ public final class PharmacyAppFrame extends JFrame {
         table.getTableHeader().setForeground(MUTED);
         table.getTableHeader().setFont(new Font("Segoe UI", Font.BOLD, 10));
         table.getTableHeader().setPreferredSize(new Dimension(100, 38));
+        // POLYMORPHISM: JTable uses this renderer through its superclass API and calls the overridden
+        // cell-rendering method for each value.
         table.setDefaultRenderer(Object.class, new StatusCellRenderer());
         TableRowSorter<DefaultTableModel> sorter = new TableRowSorter<>(model);
         table.setRowSorter(sorter);
@@ -1765,6 +1767,7 @@ public final class PharmacyAppFrame extends JFrame {
         @Override public int getIconHeight() { return 18; }
     }
 
+    // POLYMORPHISM: this subclass customizes Swing's renderer behavior by overriding its method.
     private static final class StatusCellRenderer extends DefaultTableCellRenderer {
         @Override
         public Component getTableCellRendererComponent(JTable table, Object value, boolean selected,

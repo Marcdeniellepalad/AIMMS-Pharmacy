@@ -2,8 +2,11 @@ package model.account;
 
 import security.PasswordHasher;
 
+// ABSTRACTION: common account details and the role contract are defined once;
+// Admin, Pharmacist, and Customer supply their specialized behavior.
 public abstract class User {
 
+    // ENCAPSULATION: state is private and final, and callers read it through getters.
     private final String userID;
     private final String username;
     private final String passwordHash;
