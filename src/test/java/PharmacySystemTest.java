@@ -6,10 +6,12 @@ import model.account.Pharmacist;
 import model.account.StaffStatus;
 import model.account.User;
 import model.account.UserRole;
+import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import repository.csv.CsvFileManager;
 import repository.csv.CsvWriteCoordinator;
 import security.PasswordHasher;
+import service.DemoDataSeeder;
 import service.PharmacyScreenService;
 
 import java.math.BigDecimal;
@@ -22,6 +24,11 @@ import java.util.Map;
 import static org.junit.jupiter.api.Assertions.*;
 
 class PharmacySystemTest {
+
+    @BeforeAll
+    static void seedRuntimeData() {
+        DemoDataSeeder.seedIfEmpty();
+    }
 
     @Test
     void testPasswordHasherVerifiesValidAndRejectsInvalidPasswords() {
