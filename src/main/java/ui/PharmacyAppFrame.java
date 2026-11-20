@@ -504,12 +504,26 @@ public final class PharmacyAppFrame extends JFrame {
         JLabel searchIcon = new JLabel("⌕");
         searchIcon.setForeground(MUTED);
         searchIcon.setFont(new Font("Segoe UI Symbol", Font.PLAIN, 18));
-        searchField.setBorder(BorderFactory.createEmptyBorder());
+        final String placeholder = "Search rows on the current screen...";
+        searchField.setBorder(BorderFactory.createEmptyBorder(0, 6, 0, 6));
         searchField.setOpaque(false);
-        searchField.setForeground(TEXT);
+        searchField.setForeground(MUTED);
         searchField.setFont(UI_FONT);
-        searchField.setToolTipText("Search rows on the current screen");
-        searchField.setText("");
+        searchField.setText(placeholder);
+        searchField.addFocusListener(new java.awt.event.FocusAdapter() {
+            @Override public void focusGained(java.awt.event.FocusEvent e) {
+                if (searchField.getText().equals(placeholder)) {
+                    searchField.setText("");
+                    searchField.setForeground(TEXT);
+                }
+            }
+            @Override public void focusLost(java.awt.event.FocusEvent e) {
+                if (searchField.getText().isBlank()) {
+                    searchField.setForeground(MUTED);
+                    searchField.setText(placeholder);
+                }
+            }
+        });
         if (!searchListenerAdded) {
             searchField.getDocument().addDocumentListener(new DocumentListener() {
                 @Override public void insertUpdate(DocumentEvent event) { applySearch(); }
@@ -649,8 +663,16 @@ public final class PharmacyAppFrame extends JFrame {
         } else if (screen == Screen.RESTOCK_REQUESTS && currentUser != null
                 && currentUser.role() == UserRole.PHARMACIST) {
             JButton request = primaryButton("＋ New request");
-            request.addActionListener(event -> openRestockRequestPreview());
+                        request.addActionListener(event -> openRestockRequestPreview());
             heading.add(request, BorderLayout.EAST);
+        } else if (screen == Screen.PRESCRIPTIONS) {
+            JButton verifyRx = primaryButton("Verify / update selected");
+            verifyRx.addActionListener(event -> openSelectedPrescriptionReview());
+            heading.add(verifyRx, BorderLayout.EAST);
+        } else if (screen == Screen.TRANSACTIONS) {
+            JButton voidTxn = secondaryButton("Void selected sale");
+            voidTxn.addActionListener(event -> voidSelectedTransaction());
+            heading.add(voidTxn, BorderLayout.EAST);
         }
         return heading;
     }
@@ -812,7 +834,7 @@ public final class PharmacyAppFrame extends JFrame {
             return;
         }
         int quantity = existing == null ? 1 : existing.quantity() + 1;
-        cartItems.put(itemID, new CartLine(itemID, row.get(0), row.get(1), new BigDecimal(row.get(4).replace("₱ ", "")),
+        cartItems.put(itemID, new CartLine(itemID, row.get(0), row.get(1), new BigDecimal(row.get(4).replaceAll("[^0-9.]", "")),
                 row.get(5), available, quantity));
         renderCart();
     }
@@ -1310,7 +1332,7 @@ public final class PharmacyAppFrame extends JFrame {
             return;
         }
         String value = searchField.getText().trim();
-        if (value.isEmpty()) {
+        if (value.isEmpty() || value.equals("Search rows on the current screen...")) { 
             currentSorter.setRowFilter(null);
         } else {
             currentSorter.setRowFilter(RowFilter.regexFilter("(?i)" + Pattern.quote(value)));
@@ -1418,19 +1440,127 @@ public final class PharmacyAppFrame extends JFrame {
 
     private void openSelectedPharmacist() {
         if (currentTable == null || currentTable.getSelectedRow() < 0 || currentData == null) {
-            javax.swing.JOptionPane.showMessageDialog(this, "Select a pharmacist account to review.",
-                    "Pharmacist accounts", javax.swing.JOptionPane.INFORMATION_MESSAGE);
+            JOptionPane.showMessageDialog(this, "Select a pharmacist account to review.",
+                    "Pharmacist accounts", JOptionPane.INFORMATION_MESSAGE);
             return;
         }
         int modelRow = currentTable.convertRowIndexToModel(currentTable.getSelectedRow());
         List<String> row = currentData.rows().get(modelRow);
-        String details = "Pharmacist: " + row.get(1)
-                + "\nUsername: " + row.get(2)
-                + "\nStatus: " + row.get(3)
-                + "\nRegistered: " + row.get(4)
-                + "\nApproved date: " + row.get(5);
-        javax.swing.JOptionPane.showMessageDialog(this, details,
-                "Review pharmacist account", javax.swing.JOptionPane.INFORMATION_MESSAGE);
+        String pharmacistID = row.get(0);
+        String fullName = row.get(1);
+        String username = row.get(2);
+        String status = row.get(3);
+        String registered = row.get(4);
+        String approvedDate = row.get(5);
+
+        String details = "Pharmacist ID: " + pharmacistID
+                + "\nFull Name: " + fullName
+                + "\nUsername: " + username
+                + "\nStatus: " + status
+                + "\nRegistered: " + registered
+                + "\nApproved date: " + (approvedDate == null || approvedDate.isBlank() ? "Not yet approved" : approvedDate);
+
+        if ("PENDING".equalsIgnoreCase(status) && currentUser != null && currentUser.role() == UserRole.ADMIN) {
+            int choice = JOptionPane.showOptionDialog(
+                    this,
+                    details + "\n\nApprove this pending pharmacist account so they can sign in?",
+                    "Review pending pharmacist",
+                    JOptionPane.YES_NO_OPTION,
+                    JOptionPane.QUESTION_MESSAGE,
+                    null,
+                    new Object[]{"Approve account", "Close"},
+                    "Approve account");
+            if (choice == JOptionPane.YES_OPTION) {
+                try {
+                    String approvedName = controller.approvePharmacist(pharmacistID, currentUser.userID());
+                    JOptionPane.showMessageDialog(this,
+                            approvedName + " (" + pharmacistID + ") is now ACTIVE.",
+                            "Pharmacist approved",
+                            JOptionPane.INFORMATION_MESSAGE);
+                    openScreen(Screen.PHARMACISTS);
+                } catch (RuntimeException ex) {
+                    JOptionPane.showMessageDialog(this, actionErrorMessage(ex),
+                            "Could not approve pharmacist", JOptionPane.WARNING_MESSAGE);
+                }
+            }
+        } else {
+            JOptionPane.showMessageDialog(this, details,
+                    "Review pharmacist account", JOptionPane.INFORMATION_MESSAGE);
+        }
+    }
+
+    private void openSelectedPrescriptionReview() {
+        if (currentTable == null || currentTable.getSelectedRow() < 0 || currentData == null) {
+            JOptionPane.showMessageDialog(this, "Select a prescription row first.",
+                    "Prescriptions", JOptionPane.INFORMATION_MESSAGE);
+            return;
+        }
+        int modelRow = currentTable.convertRowIndexToModel(currentTable.getSelectedRow());
+        List<String> row = currentData.rows().get(modelRow);
+        String rxID = row.get(0);
+        String patient = row.get(1);
+        String prescriber = row.get(2);
+        String validUntil = row.get(4);
+        String currentStatus = row.get(5);
+
+        JComboBox<String> statusBox = new JComboBox<>(new String[]{"VERIFIED", "NEEDS_CLARIFICATION", "REJECTED"});
+        JTextField notesField = new JTextField(22);
+
+        JPanel panel = new JPanel(new GridLayout(0, 1, 6, 6));
+        panel.add(new JLabel("Prescription: " + rxID + " | Patient: " + patient));
+        panel.add(new JLabel("Prescriber: " + prescriber + " | Valid Until: " + validUntil));
+        panel.add(new JLabel("Current Status: " + currentStatus));
+        panel.add(new JLabel("New Decision:"));
+        panel.add(statusBox);
+        panel.add(new JLabel("Verification / Clarification Notes:"));
+        panel.add(notesField);
+
+        int res = JOptionPane.showConfirmDialog(this, panel, "Verify External Prescription",
+                JOptionPane.OK_CANCEL_OPTION, JOptionPane.PLAIN_MESSAGE);
+        if (res == JOptionPane.OK_OPTION && currentUser != null) {
+            try {
+                String updated = controller.reviewPrescription(
+                        rxID,
+                        (String) statusBox.getSelectedItem(),
+                        notesField.getText(),
+                        currentUser.userID(),
+                        currentUser.role().name());
+                JOptionPane.showMessageDialog(this, "Updated: " + updated,
+                        "Prescription Updated", JOptionPane.INFORMATION_MESSAGE);
+                openScreen(Screen.PRESCRIPTIONS);
+            } catch (RuntimeException ex) {
+                JOptionPane.showMessageDialog(this, actionErrorMessage(ex),
+                        "Verification Failed", JOptionPane.WARNING_MESSAGE);
+            }
+        }
+    }
+
+    private void voidSelectedTransaction() {
+        if (currentTable == null || currentTable.getSelectedRow() < 0 || currentData == null) {
+            JOptionPane.showMessageDialog(this, "Select a completed transaction to void.",
+                    "Transactions", JOptionPane.INFORMATION_MESSAGE);
+            return;
+        }
+        int modelRow = currentTable.convertRowIndexToModel(currentTable.getSelectedRow());
+        List<String> row = currentData.rows().get(modelRow);
+        String txnID = row.get(0);
+
+        String reason = JOptionPane.showInputDialog(this,
+                "Enter reason for voiding " + txnID + " (records a reversal outcome):",
+                "Void Transaction",
+                JOptionPane.WARNING_MESSAGE);
+        if (reason != null && !reason.isBlank() && currentUser != null) {
+            try {
+                controller.voidTransaction(txnID, reason, currentUser.userID(), currentUser.role().name());
+                JOptionPane.showMessageDialog(this,
+                        "Transaction " + txnID + " marked CANCELLED and logged as VOID_REVERSED.",
+                        "Sale Voided", JOptionPane.INFORMATION_MESSAGE);
+                openScreen(Screen.TRANSACTIONS);
+            } catch (RuntimeException ex) {
+                JOptionPane.showMessageDialog(this, actionErrorMessage(ex),
+                        "Void Failed", JOptionPane.WARNING_MESSAGE);
+            }
+        }
     }
 
     private void approveSelectedRestockRequest() {
@@ -1534,29 +1664,48 @@ public final class PharmacyAppFrame extends JFrame {
     private JButton primaryButton(String label) {
         JButton button = new JButton(label);
         button.setFont(new Font("Segoe UI", Font.BOLD, 12));
-        button.setBackground(MAROON);
+        Color baseBg = MAROON;
+        Color hoverBg = new Color(0x5E, 0x0D, 0x10);
+        button.setBackground(baseBg);
         button.setForeground(WHITE);
         button.setOpaque(true);
         button.setContentAreaFilled(true);
         button.setBorderPainted(false);
-        button.setFocusPainted(true);
-        button.setBorder(BorderFactory.createEmptyBorder(10, 15, 10, 15));
+        button.setFocusPainted(false);
+        button.setBorder(BorderFactory.createEmptyBorder(10, 16, 10, 16));
         button.setCursor(java.awt.Cursor.getPredefinedCursor(java.awt.Cursor.HAND_CURSOR));
+        button.addMouseListener(new java.awt.event.MouseAdapter() {
+            @Override public void mouseEntered(java.awt.event.MouseEvent e) {
+                if (button.isEnabled()) button.setBackground(hoverBg);
+            }
+            @Override public void mouseExited(java.awt.event.MouseEvent e) {
+                button.setBackground(baseBg);
+            }
+        });
         return button;
     }
 
     private JButton secondaryButton(String label) {
         JButton button = new JButton(label);
         button.setFont(new Font("Segoe UI", Font.BOLD, 12));
+        Color hoverBg = new Color(0xF7, 0xF2, 0xF0);
         button.setBackground(WHITE);
         button.setForeground(MAROON);
         button.setOpaque(true);
         button.setContentAreaFilled(true);
         button.setBorder(BorderFactory.createCompoundBorder(
                 BorderFactory.createLineBorder(new Color(0xDE, 0xD4, 0xD0)),
-                BorderFactory.createEmptyBorder(8, 13, 8, 13)));
-        button.setFocusPainted(true);
+                BorderFactory.createEmptyBorder(8, 14, 8, 14)));
+        button.setFocusPainted(false);
         button.setCursor(java.awt.Cursor.getPredefinedCursor(java.awt.Cursor.HAND_CURSOR));
+        button.addMouseListener(new java.awt.event.MouseAdapter() {
+            @Override public void mouseEntered(java.awt.event.MouseEvent e) {
+                if (button.isEnabled()) button.setBackground(hoverBg);
+            }
+            @Override public void mouseExited(java.awt.event.MouseEvent e) {
+                button.setBackground(WHITE);
+            }
+        });
         return button;
     }
 
@@ -1827,3 +1976,4 @@ public final class PharmacyAppFrame extends JFrame {
         @Override public String toString() { return name + " · " + itemID; }
     }
 }
+
