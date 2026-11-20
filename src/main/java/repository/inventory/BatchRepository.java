@@ -14,6 +14,7 @@ import model.inventory.Batch;
 import model.inventory.BatchStatus;
 import repository.csv.CsvDataException;
 import repository.csv.CsvFileManager;
+import repository.csv.CsvWriteCoordinator;
 
 public class BatchRepository {
 
@@ -68,6 +69,12 @@ public class BatchRepository {
         writeBatches(batches);
     }
 
+    /** Builds one coordinated-write entry so FEFO deductions and restock receipts commit with the other sale files atomically. */
+    public CsvWriteCoordinator.Update asUpdate(List<Batch> batches) {
+        Objects.requireNonNull(batches, "batches must not be null");
+        return new CsvWriteCoordinator.Update(FILE_PATH, HEADERS, encodeRows(batches));
+    }
+
     private List<Batch> readBatches() {
         List<Map<String, String>> records = csvFileManager.readRecords(FILE_PATH, HEADERS);
         List<Batch> batches = new ArrayList<>(records.size());
@@ -97,6 +104,10 @@ public class BatchRepository {
     }
 
     private void writeBatches(List<Batch> batches) {
+        csvFileManager.writeRecords(FILE_PATH, HEADERS, encodeRows(batches));
+    }
+
+    private List<Map<String, String>> encodeRows(List<Batch> batches) {
         List<Map<String, String>> records = new ArrayList<>(batches.size());
         for (Batch batch : batches) {
             Objects.requireNonNull(batch.getExpirationDate(), "batch expiration date is required");
@@ -111,7 +122,7 @@ public class BatchRepository {
                     "dateReceived", batch.getDateReceived().toString(),
                     "status", batch.getStatus().name()));
         }
-        csvFileManager.writeRecords(FILE_PATH, HEADERS, records);
+        return records;
     }
 
     private static String required(Map<String, String> record, String field) {
