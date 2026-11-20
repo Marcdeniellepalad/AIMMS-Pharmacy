@@ -2,6 +2,7 @@ package model.inventory;
 
 import java.math.BigDecimal;
 
+// ENCAPSULATION: item fields are private and immutable; changes must go through repository operations.
 public class Item {
 
     private final String itemID;

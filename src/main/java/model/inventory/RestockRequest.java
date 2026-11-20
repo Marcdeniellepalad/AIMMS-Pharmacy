@@ -84,13 +84,30 @@ public class RestockRequest {
         return status;
     }
 
+    public RestockRequest approve() {
+        if (status != RestockRequestStatus.REQUESTED) {
+            throw new IllegalStateException("Only a pending restock request can be approved.");
+        }
+        return new RestockRequest(
+                requestID,
+                itemID,
+                quantityRequested,
+                quantityReceived,
+                requestedByPharmacistID,
+                dateRequested,
+                receivedByID,
+                dateReceived,
+                RestockRequestStatus.APPROVED,
+                details);
+    }
+
     public String getDetails() {
         return details;
     }
 
     public RestockRequest recordReceipt(int quantity, String receivedByID, LocalDate dateReceived) {
-        if (status != RestockRequestStatus.REQUESTED && status != RestockRequestStatus.PARTIALLY_RECEIVED) {
-            throw new IllegalStateException("Only an open restock request can receive stock.");
+        if (status != RestockRequestStatus.APPROVED && status != RestockRequestStatus.PARTIALLY_RECEIVED) {
+            throw new IllegalStateException("Only an approved restock request can receive stock.");
         }
         if (quantity <= 0 || quantity > getQuantityRemaining()) {
             throw new IllegalArgumentException("Receipt quantity must be positive and cannot exceed the remaining request.");

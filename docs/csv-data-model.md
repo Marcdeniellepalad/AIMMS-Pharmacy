@@ -1,6 +1,6 @@
 # CSV data model
 
-**Status: proposed schema.** The fields below turn the Notion workflow into a file layout; the workflow requirements are the baseline, while these exact field names and extra data fields are implementation proposals for team review. They are not legal conclusions. These tracked CSV files are templates and currently contain headers only. Live application records are planned for `data/runtime/`, which is ignored by Git. Use synthetic data in examples; never add real customer or prescription records to the repository.
+**Status: proposed schema.** The fields below turn the Notion workflow into a file layout; the workflow requirements are the baseline, while these exact field names and extra data fields are implementation proposals for team review. They are not legal conclusions. Tracked CSV files under `data/` are schema templates and contain headers only. Synthetic inventory starter records live separately under `data/sample/inventory/` and are copied into `data/runtime/` on first app startup; runtime files are ignored by Git. Use synthetic data in examples; never add real customer or prescription records to the repository.
 
 ## Accounts
 
@@ -26,7 +26,7 @@ Each batch belongs to one catalog item and must have an expiration date; batches
 
 Batch status values: `ACTIVE`, `DEPLETED`, `EXPIRED`, `QUARANTINED`, `PULLED`.
 
-Restock request status values: `REQUESTED`, `PARTIALLY_RECEIVED`, `RECEIVED`, `CANCELLED`. Whether a request needs a separate approval state is still open.
+Restock request status values: `REQUESTED`, `APPROVED`, `PARTIALLY_RECEIVED`, `RECEIVED`, `CANCELLED`. Admin approval and receipt are recorded in the existing `status` field and the inventory log. The admin receipt action requires a positive received quantity, supplier lot number, and expiration date, then creates a matching inventory batch. Partial receipts create one batch per received lot.
 
 ## Prescriptions
 

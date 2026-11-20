@@ -3,6 +3,7 @@ package model.account;
 import java.math.BigDecimal;
 import java.time.LocalDate;
 
+// INHERITANCE: Customer reuses User's common account state and adds customer-specific balance/status.
 public class Customer extends User {
 
     private final BigDecimal balance;
@@ -36,6 +37,7 @@ public class Customer extends User {
     }
 
     @Override
+    // POLYMORPHISM: the shared role method returns the role specific to Customer.
     public UserRole getRole() {
         return UserRole.CUSTOMER;
     }

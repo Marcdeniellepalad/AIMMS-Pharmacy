@@ -1,0 +1,9 @@
+itemID,itemName,category,price,prescriptionRequired,status
+DEMO-ITEM-001,Paracetamol 500 mg tablet,Pain relief,4.00,false,ACTIVE
+DEMO-ITEM-002,Cetirizine 10 mg tablet,Allergy relief,16.00,false,ACTIVE
+DEMO-ITEM-003,Ibuprofen 400 mg tablet,Pain relief,4.00,false,ACTIVE
+DEMO-ITEM-004,Ascorbic acid 500 mg tablet,Vitamins,3.00,false,ACTIVE
+DEMO-ITEM-005,Loperamide 2 mg capsule,Digestive health,8.71,false,ACTIVE
+DEMO-ITEM-006,Amoxicillin 500 mg capsule,Antibiotic,7.63,true,ACTIVE
+DEMO-ITEM-007,Metformin 500 mg tablet,Diabetes care,5.75,true,ACTIVE
+DEMO-ITEM-008,Losartan 50 mg tablet,Cardiovascular,13.00,true,ACTIVE
