@@ -2028,6 +2028,7 @@ public final class PharmacyAppFrame extends JFrame {
                 field.setText(chosen.toString());
             }
         });
+        row.add(pick);
         return row;
     }
 
