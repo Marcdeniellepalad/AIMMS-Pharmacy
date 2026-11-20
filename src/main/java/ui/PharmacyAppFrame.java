@@ -4,6 +4,7 @@ import java.awt.BorderLayout;
 import java.awt.CardLayout;
 import java.awt.Color;
 import java.awt.Component;
+import java.awt.Dialog;
 import java.awt.Dimension;
 import java.awt.FlowLayout;
 import java.awt.Font;
@@ -15,13 +16,16 @@ import java.awt.GridLayout;
 import java.awt.Insets;
 import java.awt.RenderingHints;
 import java.awt.Rectangle;
+import java.awt.Window;
 import java.awt.event.ActionEvent;
 import java.awt.event.ActionListener;
 import java.math.BigDecimal;
 import java.time.LocalDate;
+import java.time.format.TextStyle;
 import java.util.EnumMap;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.concurrent.ExecutionException;
 import java.util.regex.Pattern;
@@ -1840,7 +1844,8 @@ public final class PharmacyAppFrame extends JFrame {
         content.setBackground(WHITE);
         content.setBorder(BorderFactory.createEmptyBorder(20, 22, 18, 22));
         JLabel intro = new JLabel("<html><b>Paper prescription intake</b><br>"
-                + "Records an externally issued prescription as Received; a pharmacist verifies it before dispensing.</html>");
+                + "The patient comes straight from the selected customer account; register new walk-ins on the "
+                + "Customers screen first. A pharmacist verifies the record before dispensing.</html>");
         intro.setFont(UI_FONT);
         intro.setForeground(TEXT);
         content.add(intro, BorderLayout.NORTH);
@@ -1851,7 +1856,14 @@ public final class PharmacyAppFrame extends JFrame {
         for (List<String> row : controller.load(Screen.CUSTOMERS).rows()) {
             if ("Active".equals(row.get(4))) customerBox.addItem(row.get(0) + " · " + row.get(1));
         }
-        JTextField patient = new JTextField(20);
+        JLabel patientLabel = new JLabel("Select the customer; their account name becomes the patient record.");
+        patientLabel.setForeground(MUTED);
+        customerBox.addActionListener(event -> {
+            Object choice = customerBox.getSelectedItem();
+            patientLabel.setText(choice == null
+                    ? "Select the customer; their account name becomes the patient record."
+                    : "Patient on record: " + customerNameFromChoice(choice.toString()));
+        });
         JTextField prescriber = new JTextField(20);
         JTextField license = new JTextField(20);
         JTextField prescriptionDate = new JTextField(20);
@@ -1860,11 +1872,13 @@ public final class PharmacyAppFrame extends JFrame {
         validUntil.setText(LocalDate.now().plusDays(30).toString());
         JTextField sourceReference = new JTextField(20);
         addFormRow(form, 0, "Customer", customerBox);
-        addFormRow(form, 1, "Patient name", patient);
+        addFormRow(form, 1, "Patient (from account)", patientLabel);
         addFormRow(form, 2, "Prescriber name", prescriber);
         addFormRow(form, 3, "PRC license number", license);
-        addFormRow(form, 4, "Prescription date (yyyy-MM-dd)", prescriptionDate);
-        addFormRow(form, 5, "Valid until (yyyy-MM-dd)", validUntil);
+        addFormRow(form, 4, "Prescription date (yyyy-MM-dd)",
+                dateFieldWithPicker(prescriptionDate, dialog, "Pick prescription date"));
+        addFormRow(form, 5, "Valid until (yyyy-MM-dd)",
+                dateFieldWithPicker(validUntil, dialog, "Pick valid-until date"));
         addFormRow(form, 6, "Paper reference (optional)", sourceReference);
 
         JComboBox<ItemOption> medicineBox = new JComboBox<>();
@@ -1873,10 +1887,10 @@ public final class PharmacyAppFrame extends JFrame {
                 medicineBox.addItem(new ItemOption(row.get(2), row.get(0)));
             }
         }
-        JTextField quantityField = new JTextField(8);
+        QuantityStepper prescribedQuantity = new QuantityStepper(1, 1, 999);
         JTextField directionsField = new JTextField(18);
         addFormRow(form, 7, "Prescribed medicine", medicineBox);
-        addFormRow(form, 8, "Quantity prescribed", quantityField);
+        addFormRow(form, 8, "Quantity prescribed", prescribedQuantity);
         addFormRow(form, 9, "Directions (optional)", directionsField);
         java.util.List<PharmacyScreenService.PrescriptionLine> collectedLines = new java.util.ArrayList<>();
         DefaultListModel<String> lineModel = new DefaultListModel<>();
@@ -1894,9 +1908,12 @@ public final class PharmacyAppFrame extends JFrame {
         addLine.addActionListener(event -> {
             try {
                 ItemOption selected = (ItemOption) medicineBox.getSelectedItem();
-                int quantity = Integer.parseInt(quantityField.getText().trim());
-                if (selected == null || quantity <= 0) {
-                    throw new IllegalArgumentException("Choose a prescription medicine and a quantity greater than zero.");
+                int quantity = prescribedQuantity.value();
+                if (selected == null) {
+                    throw new IllegalArgumentException("Choose a prescription medicine to add.");
+                }
+                if (quantity <= 0) {
+                    throw new IllegalArgumentException("The prescribed quantity must be greater than zero.");
                 }
                 boolean duplicate = collectedLines.stream().anyMatch(line -> line.itemID().equals(selected.itemID()));
                 if (duplicate) {
@@ -1906,11 +1923,8 @@ public final class PharmacyAppFrame extends JFrame {
                 collectedLines.add(new PharmacyScreenService.PrescriptionLine(selected.itemID(), quantity, directions));
                 lineModel.addElement(selected.itemID() + " · " + selected.name() + " · " + quantity + " unit(s)"
                         + (directions.isBlank() ? "" : " · " + directions));
-                quantityField.setText("");
                 directionsField.setText("");
-            } catch (NumberFormatException ex) {
-                JOptionPane.showMessageDialog(dialog, "Enter the prescribed quantity as a whole number.",
-                        "Check quantity", JOptionPane.WARNING_MESSAGE);
+                prescribedQuantity.reset();
             } catch (RuntimeException ex) {
                 JOptionPane.showMessageDialog(dialog, actionErrorMessage(ex), "Line not added", JOptionPane.WARNING_MESSAGE);
             }
@@ -1956,12 +1970,13 @@ public final class PharmacyAppFrame extends JFrame {
                 } catch (RuntimeException ex) {
                     throw new IllegalArgumentException("Enter both dates in yyyy-MM-dd format, such as 2026-12-31.");
                 }
+                String patientName = customerNameFromChoice(customerChoice.toString());
                 String rxID = controller.registerPrescription(
-                        customerChoice.toString().split(" · ")[0], patient.getText(), prescriber.getText(),
+                        customerChoice.toString().split(" · ")[0], patientName, prescriber.getText(),
                         license.getText(), rxDate, until, sourceReference.getText(),
                         List.copyOf(collectedLines), currentUser.userID(), currentUser.role().name());
                 dialog.dispose();
-                JOptionPane.showMessageDialog(this, rxID + " was registered for " + patient.getText().trim()
+                JOptionPane.showMessageDialog(this, rxID + " was registered for " + patientName
                         + " with " + collectedLines.size() + " medicine(s). A pharmacist verifies it on the "
                         + "Prescriptions screen before dispensing.",
                         "Prescription registered", JOptionPane.INFORMATION_MESSAGE);
@@ -1977,6 +1992,222 @@ public final class PharmacyAppFrame extends JFrame {
         dialog.setMinimumSize(new Dimension(560, dialog.getHeight()));
         dialog.setLocationRelativeTo(this);
         dialog.setVisible(true);
+    }
+
+    /** Extracts the patient name from a "CUS-00001 · Full Name" customer combo entry. */
+    private String customerNameFromChoice(String choice) {
+        int separator = choice.indexOf(" · ");
+        return separator < 0 ? choice : choice.substring(separator + 3);
+    }
+
+    /** Wraps a yyyy-MM-dd text field with an optional calendar button for one-click date entry. */
+    private JPanel dateFieldWithPicker(JTextField field, Window owner, String title) {
+        JPanel row = new JPanel(new FlowLayout(FlowLayout.LEFT, 8, 0));
+        row.setOpaque(false);
+        row.add(field);
+        JButton pick = smallButton("Pick date");
+        pick.setPreferredSize(new Dimension(84, 28));
+        pick.getAccessibleContext().setAccessibleName("Open the calendar: " + title);
+        pick.addActionListener(event -> {
+            LocalDate initial;
+            try {
+                initial = LocalDate.parse(field.getText().trim());
+            } catch (RuntimeException ex) {
+                initial = LocalDate.now();
+            }
+            LocalDate chosen = new DatePickerDialog(owner, title, initial).pick();
+            if (chosen != null) {
+                field.setText(chosen.toString());
+            }
+        });
+        return row;
+    }
+
+    /** − / count / + quantity control that mirrors the sale cart stepper; no free-typed quantities. */
+    private final class QuantityStepper extends JPanel {
+        private final int min;
+        private final int max;
+        private final int resetValue;
+        private final JButton minus = smallButton("−");
+        private final JButton plus = smallButton("+");
+        private final JLabel count = new JLabel("", SwingConstants.CENTER);
+        private int value;
+
+        QuantityStepper(int initial, int min, int max) {
+            super(new FlowLayout(FlowLayout.LEFT, 4, 0));
+            setOpaque(false);
+            this.min = min;
+            this.max = max;
+            this.resetValue = initial;
+            this.value = initial;
+            minus.getAccessibleContext().setAccessibleName("Decrease the prescribed quantity");
+            minus.addActionListener(event -> setValue(value - 1));
+            plus.getAccessibleContext().setAccessibleName("Increase the prescribed quantity");
+            plus.addActionListener(event -> setValue(value + 1));
+            count.setFont(new Font("Segoe UI", Font.BOLD, 11));
+            count.setForeground(TEXT);
+            count.setPreferredSize(new Dimension(24, 28));
+            add(minus);
+            add(count);
+            add(plus);
+            refresh();
+        }
+
+        int value() {
+            return value;
+        }
+
+        /** Returns the stepper to its starting value after a medicine line is added. */
+        void reset() {
+            setValue(resetValue);
+        }
+
+        private void setValue(int candidate) {
+            value = Math.max(min, Math.min(max, candidate));
+            refresh();
+        }
+
+        private void refresh() {
+            count.setText(Integer.toString(value));
+            minus.setEnabled(value > min);
+            plus.setEnabled(value < max);
+        }
+    }
+
+    /** Optional month-view calendar that fills the prescription date fields with a yyyy-MM-dd value. */
+    private static final class DatePickerDialog extends JDialog {
+        private final LocalDate today = LocalDate.now();
+        private final LocalDate initial;
+        private final JLabel monthTitle = new JLabel("", SwingConstants.CENTER);
+        private final JPanel calendarHost = new JPanel(new BorderLayout());
+        private LocalDate shownMonth;
+        private LocalDate selected;
+
+        DatePickerDialog(Window owner, String title, LocalDate initial) {
+            super(owner, title, Dialog.ModalityType.APPLICATION_MODAL);
+            this.initial = initial == null ? LocalDate.now() : initial;
+            this.shownMonth = this.initial.withDayOfMonth(1);
+            monthTitle.setFont(new Font("Segoe UI", Font.BOLD, 12));
+            monthTitle.setForeground(TEXT);
+
+            JPanel content = new JPanel(new BorderLayout(0, 10));
+            content.setBackground(WHITE);
+            content.setBorder(BorderFactory.createEmptyBorder(14, 16, 14, 16));
+
+            JPanel header = new JPanel(new BorderLayout(8, 0));
+            header.setOpaque(false);
+            JButton previous = navButton("‹");
+            previous.getAccessibleContext().setAccessibleName("Previous month");
+            previous.addActionListener(event -> shiftMonth(-1));
+            JButton next = navButton("›");
+            next.getAccessibleContext().setAccessibleName("Next month");
+            next.addActionListener(event -> shiftMonth(1));
+            header.add(previous, BorderLayout.WEST);
+            header.add(monthTitle, BorderLayout.CENTER);
+            header.add(next, BorderLayout.EAST);
+            content.add(header, BorderLayout.NORTH);
+
+            calendarHost.setOpaque(false);
+            content.add(calendarHost, BorderLayout.CENTER);
+
+            JPanel footer = new JPanel(new FlowLayout(FlowLayout.RIGHT, 8, 0));
+            footer.setOpaque(false);
+            JButton todayButton = footerButton("Today");
+            todayButton.addActionListener(event -> {
+                selected = LocalDate.now();
+                dispose();
+            });
+            JButton cancelButton = footerButton("Cancel");
+            cancelButton.addActionListener(event -> dispose());
+            footer.add(todayButton);
+            footer.add(cancelButton);
+            content.add(footer, BorderLayout.SOUTH);
+
+            setContentPane(content);
+            setResizable(false);
+            rebuildMonth();
+            setLocationRelativeTo(owner);
+        }
+
+        /** Shows the modal picker; returns the chosen date or null when closed without a choice. */
+        LocalDate pick() {
+            setVisible(true);
+            return selected;
+        }
+
+        private void shiftMonth(int months) {
+            shownMonth = shownMonth.plusMonths(months).withDayOfMonth(1);
+            rebuildMonth();
+        }
+
+        private void rebuildMonth() {
+            monthTitle.setText(shownMonth.getMonth().getDisplayName(TextStyle.FULL, Locale.ENGLISH)
+                    + " " + shownMonth.getYear());
+            calendarHost.removeAll();
+            calendarHost.add(monthGrid(), BorderLayout.CENTER);
+            calendarHost.revalidate();
+            calendarHost.repaint();
+            pack();
+        }
+
+        private JPanel monthGrid() {
+            JPanel grid = new JPanel(new GridLayout(0, 7, 4, 4));
+            grid.setOpaque(false);
+            for (String day : new String[] {"Su", "Mo", "Tu", "We", "Th", "Fr", "Sa"}) {
+                JLabel caption = new JLabel(day, SwingConstants.CENTER);
+                caption.setFont(new Font("Segoe UI", Font.BOLD, 10));
+                caption.setForeground(MUTED);
+                grid.add(caption);
+            }
+            LocalDate first = shownMonth.withDayOfMonth(1);
+            for (int blank = 0; blank < first.getDayOfWeek().getValue() % 7; blank++) {
+                grid.add(new JLabel());
+            }
+            for (int day = 1; day <= shownMonth.lengthOfMonth(); day++) {
+                LocalDate cell = first.withDayOfMonth(day);
+                JButton dayButton = new JButton(Integer.toString(day));
+                dayButton.setMargin(new Insets(2, 2, 2, 2));
+                dayButton.setFont(new Font("Segoe UI", Font.PLAIN, 11));
+                dayButton.setFocusPainted(false);
+                dayButton.setBackground(WHITE);
+                dayButton.setForeground(TEXT);
+                dayButton.setBorder(BorderFactory.createLineBorder(BORDER));
+                if (cell.equals(today)) {
+                    dayButton.setFont(new Font("Segoe UI", Font.BOLD, 11));
+                    dayButton.setForeground(MAROON);
+                }
+                if (cell.equals(initial)) {
+                    dayButton.setBackground(SOFT);
+                }
+                dayButton.addActionListener(event -> {
+                    selected = cell;
+                    dispose();
+                });
+                grid.add(dayButton);
+            }
+            return grid;
+        }
+
+        private JButton navButton(String glyph) {
+            JButton button = new JButton(glyph);
+            button.setFont(new Font("Segoe UI", Font.BOLD, 12));
+            button.setForeground(MAROON);
+            button.setBackground(WHITE);
+            button.setBorder(BorderFactory.createLineBorder(BORDER));
+            button.setFocusPainted(false);
+            button.setPreferredSize(new Dimension(28, 28));
+            return button;
+        }
+
+        private JButton footerButton(String label) {
+            JButton button = new JButton(label);
+            button.setFont(new Font("Segoe UI", Font.PLAIN, 11));
+            button.setForeground(MAROON);
+            button.setBackground(WHITE);
+            button.setBorder(BorderFactory.createLineBorder(BORDER));
+            button.setFocusPainted(false);
+            return button;
+        }
     }
 
     private void approveSelectedRestockRequest() {
