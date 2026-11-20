@@ -673,6 +673,16 @@ public final class PharmacyAppFrame extends JFrame {
             JButton voidTxn = secondaryButton("Void selected sale");
             voidTxn.addActionListener(event -> voidSelectedTransaction());
             heading.add(voidTxn, BorderLayout.EAST);
+        } else if (screen == Screen.CUSTOMERS) {
+            JPanel customerActions = new JPanel(new FlowLayout(FlowLayout.RIGHT, 8, 0));
+            customerActions.setOpaque(false);
+            JButton topUp = secondaryButton("Top-up selected");
+            topUp.addActionListener(event -> openTopUpDialog());
+            JButton register = primaryButton("＋ Register customer");
+            register.addActionListener(event -> openRegisterCustomerDialog());
+            customerActions.add(topUp);
+            customerActions.add(register);
+            heading.add(customerActions, BorderLayout.EAST);
         }
         return heading;
     }
@@ -796,6 +806,12 @@ public final class PharmacyAppFrame extends JFrame {
         previewNotice.setForeground(MUTED);
         previewNotice.setBorder(BorderFactory.createEmptyBorder(7, 0, 10, 0));
         cartFooter.add(previewNotice);
+        JButton clearBasket = secondaryButton("Clear basket");
+        clearBasket.setAlignmentX(Component.LEFT_ALIGNMENT);
+        clearBasket.setMaximumSize(new Dimension(Integer.MAX_VALUE, 38));
+        clearBasket.addActionListener(event -> clearBasket());
+        cartFooter.add(clearBasket);
+        cartFooter.add(Box.createVerticalStrut(8));
         JButton reviewSale = primaryButton("Review and complete sale");
         reviewSale.setAlignmentX(Component.LEFT_ALIGNMENT);
         reviewSale.setMaximumSize(new Dimension(Integer.MAX_VALUE, 40));
@@ -883,9 +899,13 @@ public final class PharmacyAppFrame extends JFrame {
             plus.getAccessibleContext().setAccessibleName("Increase " + line.name() + " quantity");
             plus.setEnabled(line.quantity() < line.available());
             plus.addActionListener(event -> changeCartQuantity(line.itemID(), 1));
+            JButton remove = smallButton("×");
+            remove.getAccessibleContext().setAccessibleName("Remove " + line.name() + " from the sale");
+            remove.addActionListener(event -> removeCartItem(line.itemID()));
             controls.add(minus);
             controls.add(quantity);
             controls.add(plus);
+            controls.add(remove);
             row.add(controls, BorderLayout.EAST);
             cartLinesPanel.add(row);
             cartLinesPanel.add(Box.createVerticalStrut(8));
@@ -915,6 +935,19 @@ public final class PharmacyAppFrame extends JFrame {
             cartItems.put(itemID, new CartLine(line.itemID(), line.name(), line.category(), line.unitPrice(),
                     line.type(), line.available(), quantity));
         }
+        renderCart();
+    }
+
+    private void removeCartItem(String itemID) {
+        cartItems.remove(itemID);
+        renderCart();
+    }
+
+    private void clearBasket() {
+        if (cartItems.isEmpty()) {
+            return;
+        }
+        cartItems.clear();
         renderCart();
     }
 
@@ -1463,12 +1496,12 @@ public final class PharmacyAppFrame extends JFrame {
         if ("PENDING".equalsIgnoreCase(status) && currentUser != null && currentUser.role() == UserRole.ADMIN) {
             int choice = JOptionPane.showOptionDialog(
                     this,
-                    details + "\n\nApprove this pending pharmacist account so they can sign in?",
+                    details + "\n\nApprove or reject this pending pharmacist application?",
                     "Review pending pharmacist",
-                    JOptionPane.YES_NO_OPTION,
+                    JOptionPane.YES_NO_CANCEL_OPTION,
                     JOptionPane.QUESTION_MESSAGE,
                     null,
-                    new Object[]{"Approve account", "Close"},
+                    new Object[]{"Approve account", "Reject application", "Close"},
                     "Approve account");
             if (choice == JOptionPane.YES_OPTION) {
                 try {
@@ -1481,6 +1514,18 @@ public final class PharmacyAppFrame extends JFrame {
                 } catch (RuntimeException ex) {
                     JOptionPane.showMessageDialog(this, actionErrorMessage(ex),
                             "Could not approve pharmacist", JOptionPane.WARNING_MESSAGE);
+                }
+            } else if (choice == JOptionPane.NO_OPTION) {
+                try {
+                    String rejectedName = controller.rejectPharmacist(pharmacistID, currentUser.userID());
+                    JOptionPane.showMessageDialog(this,
+                            rejectedName + " (" + pharmacistID + ") was marked REJECTED and can no longer sign in.",
+                            "Pharmacist rejected",
+                            JOptionPane.INFORMATION_MESSAGE);
+                    openScreen(Screen.PHARMACISTS);
+                } catch (RuntimeException ex) {
+                    JOptionPane.showMessageDialog(this, actionErrorMessage(ex),
+                            "Could not reject pharmacist", JOptionPane.WARNING_MESSAGE);
                 }
             }
         } else {
@@ -1561,6 +1606,140 @@ public final class PharmacyAppFrame extends JFrame {
                         "Void Failed", JOptionPane.WARNING_MESSAGE);
             }
         }
+    }
+
+    private void openTopUpDialog() {
+        if (currentTable == null || currentTable.getSelectedRow() < 0 || currentData == null) {
+            JOptionPane.showMessageDialog(this, "Select a customer to top up.", "Customers",
+                    JOptionPane.INFORMATION_MESSAGE);
+            return;
+        }
+        int modelRow = currentTable.convertRowIndexToModel(currentTable.getSelectedRow());
+        List<String> row = currentData.rows().get(modelRow);
+        String customerID = row.get(0);
+        String customerName = row.get(1);
+        String currentBalance = row.get(3);
+
+        JDialog dialog = new JDialog(this, "Add customer balance", true);
+        JPanel content = new JPanel(new BorderLayout(0, 14));
+        content.setBackground(WHITE);
+        content.setBorder(BorderFactory.createEmptyBorder(20, 22, 18, 22));
+        JLabel intro = new JLabel("<html><b>" + escapeHtml(customerName) + "</b><br>Customer "
+                + escapeHtml(customerID) + " · Current balance " + escapeHtml(currentBalance) + "</html>");
+        intro.setFont(UI_FONT);
+        intro.setForeground(TEXT);
+        content.add(intro, BorderLayout.NORTH);
+        JPanel form = new JPanel(new GridBagLayout());
+        form.setOpaque(false);
+        JTextField amount = new JTextField(18);
+        amount.setToolTipText("Amount to add, such as 250.00");
+        addFormRow(form, 0, "Top-up amount (₱)", amount);
+        content.add(form, BorderLayout.CENTER);
+        JLabel note = new JLabel("The top-up updates the balance and records a TOP_UP row in the audit logs.");
+        note.setFont(new Font("Segoe UI", Font.PLAIN, 10));
+        note.setForeground(MUTED);
+        JButton cancel = secondaryButton("Cancel");
+        JButton save = primaryButton("Add balance");
+        JPanel footer = new JPanel(new BorderLayout(0, 10));
+        footer.setOpaque(false);
+        footer.add(note, BorderLayout.NORTH);
+        JPanel actions = new JPanel(new FlowLayout(FlowLayout.RIGHT, 8, 0));
+        actions.setOpaque(false);
+        actions.add(cancel);
+        actions.add(save);
+        footer.add(actions, BorderLayout.SOUTH);
+        content.add(footer, BorderLayout.SOUTH);
+        cancel.addActionListener(event -> dialog.dispose());
+        save.addActionListener(event -> {
+            try {
+                BigDecimal parsed = new BigDecimal(amount.getText().trim());
+                BigDecimal newBalance = controller.topUpCustomerBalance(customerID, parsed,
+                        currentUser.userID(), currentUser.role().name());
+                dialog.dispose();
+                JOptionPane.showMessageDialog(this,
+                        customerName + " now has ₱ "
+                                + newBalance.setScale(2, java.math.RoundingMode.HALF_UP).toPlainString() + ".",
+                        "Top-up saved", JOptionPane.INFORMATION_MESSAGE);
+                openScreen(Screen.CUSTOMERS);
+            } catch (NumberFormatException ex) {
+                JOptionPane.showMessageDialog(dialog, "Enter a valid amount, such as 250.00.",
+                        "Check amount", JOptionPane.WARNING_MESSAGE);
+            } catch (RuntimeException ex) {
+                JOptionPane.showMessageDialog(dialog, actionErrorMessage(ex),
+                        "Top-up not saved", JOptionPane.WARNING_MESSAGE);
+            }
+        });
+        dialog.setContentPane(content);
+        dialog.pack();
+        dialog.setMinimumSize(new Dimension(480, dialog.getHeight()));
+        dialog.setLocationRelativeTo(this);
+        dialog.setVisible(true);
+    }
+
+    private void openRegisterCustomerDialog() {
+        JDialog dialog = new JDialog(this, "Register customer", true);
+        JPanel content = new JPanel(new BorderLayout(0, 14));
+        content.setBackground(WHITE);
+        content.setBorder(BorderFactory.createEmptyBorder(20, 22, 18, 22));
+        JLabel intro = new JLabel("<html><b>Counter registration</b><br>"
+                + "Creates an active customer account with a ₱ 0.00 starting balance.</html>");
+        intro.setFont(UI_FONT);
+        intro.setForeground(TEXT);
+        content.add(intro, BorderLayout.NORTH);
+        JPanel form = new JPanel(new GridBagLayout());
+        form.setOpaque(false);
+        JTextField fullName = new JTextField(20);
+        JTextField username = new JTextField(20);
+        JPasswordField password = new JPasswordField(20);
+        JPasswordField confirm = new JPasswordField(20);
+        addFormRow(form, 0, "Full name", fullName);
+        addFormRow(form, 1, "Username", username);
+        addFormRow(form, 2, "Password", password);
+        addFormRow(form, 3, "Confirm password", confirm);
+        content.add(form, BorderLayout.CENTER);
+        JLabel note = new JLabel("Passwords are salted and hashed with PBKDF2; at least 8 characters.");
+        note.setFont(new Font("Segoe UI", Font.PLAIN, 10));
+        note.setForeground(MUTED);
+        JButton cancel = secondaryButton("Cancel");
+        JButton save = primaryButton("Register customer");
+        JPanel footer = new JPanel(new BorderLayout(0, 10));
+        footer.setOpaque(false);
+        footer.add(note, BorderLayout.NORTH);
+        JPanel actions = new JPanel(new FlowLayout(FlowLayout.RIGHT, 8, 0));
+        actions.setOpaque(false);
+        actions.add(cancel);
+        actions.add(save);
+        footer.add(actions, BorderLayout.SOUTH);
+        content.add(footer, BorderLayout.SOUTH);
+        cancel.addActionListener(event -> dialog.dispose());
+        save.addActionListener(event -> {
+            char[] entered = password.getPassword();
+            char[] repeated = confirm.getPassword();
+            try {
+                if (!java.util.Arrays.equals(entered, repeated)) {
+                    throw new IllegalArgumentException("The two passwords do not match.");
+                }
+                String customerID = controller.registerCustomer(username.getText(), entered, fullName.getText());
+                dialog.dispose();
+                JOptionPane.showMessageDialog(this,
+                        customerID + " was registered for " + fullName.getText().trim()
+                                + " with a ₱ 0.00 starting balance.",
+                        "Customer registered", JOptionPane.INFORMATION_MESSAGE);
+                searchField.setText("");
+                openScreen(Screen.CUSTOMERS);
+            } catch (RuntimeException ex) {
+                JOptionPane.showMessageDialog(dialog, actionErrorMessage(ex),
+                        "Registration not saved", JOptionPane.WARNING_MESSAGE);
+            } finally {
+                java.util.Arrays.fill(entered, '\0');
+                java.util.Arrays.fill(repeated, '\0');
+            }
+        });
+        dialog.setContentPane(content);
+        dialog.pack();
+        dialog.setMinimumSize(new Dimension(500, dialog.getHeight()));
+        dialog.setLocationRelativeTo(this);
+        dialog.setVisible(true);
     }
 
     private void approveSelectedRestockRequest() {
@@ -1976,4 +2155,3 @@ public final class PharmacyAppFrame extends JFrame {
         @Override public String toString() { return name + " · " + itemID; }
     }
 }
-

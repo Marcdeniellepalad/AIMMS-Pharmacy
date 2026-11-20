@@ -44,7 +44,9 @@ public final class AuthenticationService {
                 if (normalized.equalsIgnoreCase(account.get("username"))
                         && PasswordHasher.verify(password.clone(), account.get("passwordHash"))) {
                     if (!"ACTIVE".equals(account.get("status"))) {
-                        throw new AuthenticationException("Your pharmacist account is awaiting administrator approval.");
+                        throw new AuthenticationException("REJECTED".equals(account.get("status"))
+                                ? "This pharmacist application was not approved."
+                                : "Your pharmacist account is awaiting administrator approval.");
                     }
                     return new UserSession(account.get("pharmacistID"), account.get("username"),
                             account.get("fullName"), UserRole.PHARMACIST);

@@ -52,4 +52,17 @@ public final class PharmacyScreenController {
     public String approvePharmacist(String pharmacistID, String adminID) {
         return screenService.approvePharmacist(pharmacistID, adminID);
     }
+
+    public String registerCustomer(String username, char[] password, String fullName) {
+        return screenService.registerCustomer(username, password, fullName);
+    }
+
+    public BigDecimal topUpCustomerBalance(String customerID, BigDecimal amount,
+            String actorID, String actorRole) {
+        return screenService.topUpCustomerBalance(customerID, amount, actorID, actorRole);
+    }
+
+    public String rejectPharmacist(String pharmacistID, String adminID) {
+        return screenService.rejectPharmacist(pharmacistID, adminID);
+    }
 }
