@@ -117,7 +117,10 @@ public final class DemoDataSeeder {
         write("data/runtime/accounts/customerDB.csv", CUSTOMER_HEADERS, List.of(
                 row("customerID", "CUS-00001", "username", "sample.customer", "passwordHash", customerPasswordHash,
                         "fullName", "Jordan Santos", "balance", "1250.00", "status", "ACTIVE",
-                        "dateRegistered", today.minusDays(90).toString())));
+                        "dateRegistered", today.minusDays(90).toString()),
+                row("customerID", "CUS-00002", "username", "andrea.lim", "passwordHash", customerPasswordHash,
+                        "fullName", "Andrea Lim", "balance", "300.00", "status", "ACTIVE",
+                        "dateRegistered", today.minusDays(30).toString())));
         seedInventoryFromSamples();
         write("data/runtime/inventory/restockRequests.csv", RESTOCK_HEADERS, List.of(
                 row("requestID", "RST-00001", "itemID", "DEMO-ITEM-006", "quantityRequested", "60",
@@ -134,11 +137,20 @@ public final class DemoDataSeeder {
                         "prescriberName", "Dr. Morgan Lee", "prescriberLicenseNumber", "PRC-654321",
                         "prescriptionDate", today.minusDays(3).toString(), "dateReceived", today.minusDays(1).toString(),
                         "validUntil", today.plusDays(17).toString(), "sourceType", "PAPER",
-                        "sourceReference", "DEMO-RX-00002", "status", "NEEDS_CLARIFICATION")));
+                        "sourceReference", "DEMO-RX-00002", "status", "NEEDS_CLARIFICATION"),
+                row("prescriptionID", "RX-00003", "customerID", "CUS-00002", "patientName", "Andrea Lim",
+                        "prescriberName", "Dr. Taylor Reyes", "prescriberLicenseNumber", "PRC-123456",
+                        "prescriptionDate", today.minusDays(1).toString(), "dateReceived", today.toString(),
+                        "validUntil", today.plusDays(20).toString(), "sourceType", "PAPER",
+                        "sourceReference", "DEMO-RX-00003", "status", "VERIFIED")));
         write("data/runtime/prescriptions/prescriptionItemsDB.csv", PRESCRIPTION_ITEM_HEADERS, List.of(
                 row("prescriptionItemID", "RXI-00001", "prescriptionID", "RX-00001", "itemID", "DEMO-ITEM-006",
                         "medicineName", "Amoxicillin", "strength", "500 mg", "dosageForm", "Capsule",
                         "directions", "Take one capsule three times daily", "quantityPrescribed", "21",
+                        "quantityDispensed", "0"),
+                row("prescriptionItemID", "RXI-00002", "prescriptionID", "RX-00003", "itemID", "DEMO-ITEM-008",
+                        "medicineName", "Losartan 50 mg tablet", "strength", "50 mg", "dosageForm", "Tablet",
+                        "directions", "Take one tablet once daily", "quantityPrescribed", "14",
                         "quantityDispensed", "0")));
         String dateTime = now.toString();
         write("data/runtime/transactions/transactionsDB.csv", TRANSACTION_HEADERS, List.of(
@@ -162,7 +174,11 @@ public final class DemoDataSeeder {
                 row("logID", "LOG-00003", "prescriptionID", "RX-00001", "actorID", "PHR-00001",
                         "actorRole", "PHARMACIST", "action", "PRESCRIPTION_RECEIVED", "dateTime", dateTime,
                         "reason", "External prescription intake", "outcome", "PENDING_REVIEW",
-                        "relatedRecordID", "RX-00001", "details", "Synthetic demo record.")));
+                        "relatedRecordID", "RX-00001", "details", "Synthetic demo record."),
+                row("logID", "LOG-00006", "prescriptionID", "RX-00003", "actorID", "PHR-00001",
+                        "actorRole", "PHARMACIST", "action", "VERIFIED", "dateTime", dateTime,
+                        "reason", "Verified license PRC-123456", "outcome", "SUCCESS",
+                        "relatedRecordID", "", "details", "Status updated to VERIFIED.")));
         write("data/runtime/logs/transactionLogs.csv", TRANSACTION_LOG_HEADERS, List.of(
                 row("logID", "LOG-00004", "transactionID", "TXN-00001", "customerID", "CUS-00001",
                         "actorID", "PHR-00001", "actorRole", "PHARMACIST", "action", "SALE_COMPLETED",

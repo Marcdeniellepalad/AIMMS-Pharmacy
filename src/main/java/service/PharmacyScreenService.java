@@ -22,6 +22,8 @@ import model.inventory.ItemStatus;
 import model.inventory.RestockRequest;
 import model.inventory.RestockRequestStatus;
 import model.log.BalanceLogAction;
+import model.log.TransactionLogAction;
+import model.transaction.TransactionStatus;
 import repository.csv.CsvFileManager;
 import repository.csv.CsvWriteCoordinator;
 import repository.inventory.BatchRepository;
@@ -78,6 +80,9 @@ public final class PharmacyScreenService {
     private static final List<String> PRESCRIPTION_HEADERS = List.of(
             "prescriptionID", "customerID", "patientName", "prescriberName", "prescriberLicenseNumber",
             "prescriptionDate", "dateReceived", "validUntil", "sourceType", "sourceReference", "status");
+    private static final List<String> PRESCRIPTION_ITEM_HEADERS = List.of(
+            "prescriptionItemID", "prescriptionID", "itemID", "medicineName", "strength", "dosageForm",
+            "directions", "quantityPrescribed", "quantityDispensed");
     private static final List<String> TRANSACTION_HEADERS = List.of(
             "transactionID", "customerID", "pharmacistID", "totalAmount", "status", "dateTime");
     private static final List<String> TRANSACTION_ITEM_HEADERS = List.of(
@@ -96,9 +101,7 @@ public final class PharmacyScreenService {
             "logID", "customerID", "actorID", "actorRole", "action", "amount", "balanceBefore",
             "balanceAfter", "dateTime", "reason", "outcome", "relatedRecordID", "details");
     private static final List<String> PRESCRIPTION_LOG_HEADERS = List.of(
-            
             "logID", "prescriptionID", "actorID", "actorRole", "action", "dateTime",
-           
             "reason", "outcome", "relatedRecordID", "details");
 
     private final ItemRepository itemRepository;
@@ -159,7 +162,28 @@ public final class PharmacyScreenService {
                 prescriptionRequired, status));
     }
 
-    public record SaleLine(String itemID, int quantity) { }
+    /** One medicine line entered when registering a paper prescription at the counter. */
+    public record PrescriptionLine(String itemID, int quantityPrescribed, String directions) { }
+
+    /** A verified prescription item the counter is still allowed to dispense for a customer. */
+    public record EligibleRxItem(
+            String prescriptionItemID,
+            String prescriptionID,
+            String itemID,
+            String medicineName,
+            int remaining,
+            LocalDate validUntil) {
+        @Override public String toString() {
+            return prescriptionItemID + " · " + medicineName + " · " + remaining + " left · valid until " + validUntil;
+        }
+    }
+
+    public record SaleLine(String itemID, int quantity, String prescriptionItemID) {
+        /** Convenience constructor for over-the-counter lines with no prescription linkage. */
+        public SaleLine(String itemID, int quantity) {
+            this(itemID, quantity, "");
+        }
+    }
 
     /** Commits a local counter sale, FEFO stock deductions, customer balance deduction, and audit rows as one recoverable write. */
     public String completeSale(String customerID, List<SaleLine> saleLines, String actorID, String actorRole) {
@@ -173,8 +197,13 @@ public final class PharmacyScreenService {
             Item item = byId.get(line.itemID());
             if (line.quantity() <= 0 || item == null || item.getStatus() != ItemStatus.ACTIVE)
                 throw new IllegalArgumentException("A sale item is invalid or inactive. Refresh the catalog and try again.");
-            if (item.isPrescriptionRequired())
-                throw new IllegalArgumentException("Prescription medicine cannot be sold until a verified prescription dispensing flow is connected.");
+            boolean rxLinked = line.prescriptionItemID() != null && !line.prescriptionItemID().isBlank();
+            if (item.isPrescriptionRequired() && !rxLinked)
+                throw new IllegalArgumentException(item.getItemName()
+                        + " is prescription medicine. Attach a verified prescription item before adding it to the sale.");
+            if (!item.isPrescriptionRequired() && rxLinked)
+                throw new IllegalArgumentException(item.getItemName()
+                        + " is over-the-counter and cannot be linked to a prescription item.");
         }
         String customer = customerID == null || customerID.isBlank() ? "" : customerID.trim();
         List<Map<String, String>> customers = new ArrayList<>(
@@ -199,6 +228,68 @@ public final class PharmacyScreenService {
                 throw new IllegalArgumentException("The customer account has a negative stored balance.");
         }
 
+        List<Map<String, String>> rxItems = new ArrayList<>(
+                read("data/runtime/prescriptions/prescriptionItemsDB.csv", PRESCRIPTION_ITEM_HEADERS));
+        List<Map<String, String>> prescriptions = new ArrayList<>(
+                read("data/runtime/prescriptions/prescriptionsDB.csv", PRESCRIPTION_HEADERS));
+        Map<String, Map<String, String>> rxItemsByID = new HashMap<>();
+        for (Map<String, String> rxItem : rxItems) rxItemsByID.put(rxItem.get("prescriptionItemID"), rxItem);
+        Map<String, Map<String, String>> prescriptionsByID = new HashMap<>();
+        for (Map<String, String> prescription : prescriptions) prescriptionsByID.put(prescription.get("prescriptionID"), prescription);
+        for (SaleLine line : saleLines) {
+            if (line.prescriptionItemID() == null || line.prescriptionItemID().isBlank()) continue;
+            Map<String, String> rxItem = rxItemsByID.get(line.prescriptionItemID().trim());
+            Item item = byId.get(line.itemID());
+            if (rxItem != null && item != null && !item.getItemID().equals(rxItem.get("itemID"))) {
+                throw new IllegalArgumentException("Prescription item " + rxItem.get("prescriptionItemID")
+                        + " was issued for " + rxItem.get("itemID") + " and cannot cover " + item.getItemID() + ".");
+            }
+        }
+        Map<String, Integer> requestedByRxItem = new java.util.LinkedHashMap<>();
+        for (SaleLine line : saleLines) {
+            if (line.prescriptionItemID() == null || line.prescriptionItemID().isBlank()) continue;
+            requestedByRxItem.merge(line.prescriptionItemID().trim(), line.quantity(), Integer::sum);
+        }
+        for (Map.Entry<String, Integer> requested : requestedByRxItem.entrySet()) {
+            Map<String, String> rxItem = rxItemsByID.get(requested.getKey());
+            if (rxItem == null) {
+                throw new IllegalArgumentException("The attached prescription item " + requested.getKey()
+                        + " no longer exists. Refresh the prescriptions screen and re-attach it.");
+            }
+            Map<String, String> prescription = prescriptionsByID.get(rxItem.get("prescriptionID"));
+            if (prescription == null) {
+                throw new IllegalArgumentException("Prescription " + rxItem.get("prescriptionID")
+                        + " behind " + requested.getKey() + " no longer exists.");
+            }
+            String rxID = prescription.get("prescriptionID");
+            switch (prescription.get("status")) {
+                case "VERIFIED", "PARTIALLY_DISPENSED" -> { }
+                case "RECEIVED" -> throw new IllegalArgumentException("Prescription " + rxID
+                        + " has not been verified by a pharmacist yet. Verify it on the Prescriptions screen first.");
+                case "NEEDS_CLARIFICATION" -> throw new IllegalArgumentException("Prescription " + rxID
+                        + " is waiting for the prescriber's clarification and cannot be dispensed.");
+                case "REJECTED" -> throw new IllegalArgumentException("Prescription " + rxID
+                        + " was rejected and can never be dispensed.");
+                case "DISPENSED" -> throw new IllegalArgumentException("Prescription " + rxID
+                        + " is already fully dispensed.");
+                default -> throw new IllegalArgumentException("Prescription " + rxID + " has an unknown status.");
+            }
+            if (!customer.equals(prescription.get("customerID"))) {
+                throw new IllegalArgumentException("Prescription " + rxID + " belongs to customer "
+                        + prescription.get("customerID") + " and cannot be dispensed on this sale.");
+            }
+            LocalDate validUntil = LocalDate.parse(prescription.get("validUntil"));
+            if (validUntil.isBefore(LocalDate.now())) {
+                throw new IllegalArgumentException("Prescription " + rxID + " expired on " + validUntil
+                        + " and can no longer be dispensed.");
+            }
+            int remaining = Integer.parseInt(rxItem.get("quantityPrescribed"))
+                    - Integer.parseInt(rxItem.get("quantityDispensed"));
+            if (requested.getValue() > remaining) {
+                throw new IllegalArgumentException("Prescription item " + requested.getKey() + " only allows "
+                        + Math.max(remaining, 0) + " more unit(s), but the sale asks for " + requested.getValue() + ".");
+            }
+        }
         List<Map<String, String>> batches = read("data/runtime/inventory/batchDB.csv", BATCH_HEADERS);
         List<Map<String, String>> transactions = new ArrayList<>(read("data/runtime/transactions/transactionsDB.csv", TRANSACTION_HEADERS));
         List<Map<String, String>> transactionItems = new ArrayList<>(read("data/runtime/transactions/transactionItemsDB.csv", TRANSACTION_ITEM_HEADERS));
@@ -234,7 +325,8 @@ public final class PharmacyScreenService {
                 transactionItems.add(row(TRANSACTION_ITEM_HEADERS,
                         "transactionItemID", nextID(transactionItems, "transactionItemID", "TXI-"),
                         "transactionID", transactionID, "itemID", item.getItemID(), "batchID", batch.get("batchID"),
-                        "prescriptionItemID", "", "quantity", Integer.toString(deducted),
+                        "prescriptionItemID", line.prescriptionItemID() == null ? "" : line.prescriptionItemID().trim(),
+                        "quantity", Integer.toString(deducted),
                         "unitPrice", item.getPrice().toPlainString(), "subtotal", subtotal.toPlainString()));
                 batchLogs.add(row(BATCH_LOG_HEADERS,
                         "logID", nextID(batchLogs, "logID", "LOG-"), "batchID", batch.get("batchID"),
@@ -280,6 +372,58 @@ public final class PharmacyScreenService {
                     "details", "Deducted the sale total from the customer balance."));
             updates.add(new CsvWriteCoordinator.Update(Path.of("data/runtime/accounts/customerDB.csv"), CUSTOMER_HEADERS, customers));
             updates.add(new CsvWriteCoordinator.Update(Path.of("data/runtime/logs/balanceLogs.csv"), BALANCE_LOG_HEADERS, balanceLogs));
+        }
+        if (!requestedByRxItem.isEmpty()) {
+            List<String> touchedPrescriptions = new ArrayList<>();
+            List<Map<String, String>> rxLogs = new ArrayList<>(
+                    read("data/runtime/logs/prescriptionLogs.csv", PRESCRIPTION_LOG_HEADERS));
+            for (Map.Entry<String, Integer> requested : requestedByRxItem.entrySet()) {
+                for (int index = 0; index < rxItems.size(); index++) {
+                    Map<String, String> rxItemRow = rxItems.get(index);
+                    if (!requested.getKey().equals(rxItemRow.get("prescriptionItemID"))) continue;
+                    Map<String, String> updatedItem = new java.util.LinkedHashMap<>(rxItemRow);
+                    int dispensed = Integer.parseInt(updatedItem.get("quantityDispensed")) + requested.getValue();
+                    updatedItem.put("quantityDispensed", Integer.toString(dispensed));
+                    rxItems.set(index, updatedItem);
+                    touchedPrescriptions.add(updatedItem.get("prescriptionID"));
+                    rxLogs.add(row(PRESCRIPTION_LOG_HEADERS,
+                            "logID", nextID(rxLogs, "logID", "LOG-"),
+                            "prescriptionID", updatedItem.get("prescriptionID"),
+                            "actorID", actorID, "actorRole", actorRole, "action", "DISPENSE",
+                            "dateTime", now, "reason", "Counter sale " + transactionID,
+                            "outcome", "SUCCESS", "relatedRecordID", transactionID,
+                            "details", "Dispensed " + requested.getValue() + " unit(s) of "
+                                    + updatedItem.getOrDefault("medicineName", updatedItem.get("itemID"))
+                                    + "; " + Math.max(Integer.parseInt(updatedItem.get("quantityPrescribed")) - dispensed, 0)
+                                    + " unit(s) remain on the prescription."));
+                }
+            }
+            for (String rxID : touchedPrescriptions.stream().distinct().toList()) {
+                for (int index = 0; index < prescriptions.size(); index++) {
+                    Map<String, String> prescriptionRow = prescriptions.get(index);
+                    if (!rxID.equals(prescriptionRow.get("prescriptionID"))) continue;
+                    boolean fullyDispensed = rxItems.stream()
+                            .filter(item -> rxID.equals(item.get("prescriptionID")))
+                            .allMatch(item -> Integer.parseInt(item.get("quantityDispensed"))
+                                    >= Integer.parseInt(item.get("quantityPrescribed")));
+                    Map<String, String> updatedRow = new java.util.LinkedHashMap<>(prescriptionRow);
+                    String newState = fullyDispensed ? "DISPENSED" : "PARTIALLY_DISPENSED";
+                    updatedRow.put("status", newState);
+                    prescriptions.set(index, updatedRow);
+                    rxLogs.add(row(PRESCRIPTION_LOG_HEADERS,
+                            "logID", nextID(rxLogs, "logID", "LOG-"),
+                            "prescriptionID", rxID, "actorID", actorID, "actorRole", actorRole,
+                            "action", "DISPENSE", "dateTime", now, "reason", "Counter sale " + transactionID,
+                            "outcome", "SUCCESS", "relatedRecordID", transactionID,
+                            "details", "Prescription marked " + newState + " after this sale."));
+                }
+            }
+            updates.add(new CsvWriteCoordinator.Update(Path.of("data/runtime/prescriptions/prescriptionItemsDB.csv"),
+                    PRESCRIPTION_ITEM_HEADERS, rxItems));
+            updates.add(new CsvWriteCoordinator.Update(Path.of("data/runtime/prescriptions/prescriptionsDB.csv"),
+                    PRESCRIPTION_HEADERS, prescriptions));
+            updates.add(new CsvWriteCoordinator.Update(Path.of("data/runtime/logs/prescriptionLogs.csv"),
+                    PRESCRIPTION_LOG_HEADERS, rxLogs));
         }
         writeCoordinator.commit(updates);
         return transactionID;
@@ -408,6 +552,127 @@ public final class PharmacyScreenService {
         return batchID;
     }
 
+    /** Registers an externally issued paper prescription brought to the counter. */
+    public String registerPrescription(String customerID, String patientName, String prescriberName,
+            String prescriberLicenseNumber, LocalDate prescriptionDate, LocalDate validUntil,
+            String sourceReference, List<PrescriptionLine> lines, String actorID, String actorRole) {
+        if (actorID == null || actorID.isBlank() || actorRole == null || actorRole.isBlank())
+            throw new IllegalArgumentException("A signed-in staff member is required.");
+        if (patientName == null || patientName.isBlank())
+            throw new IllegalArgumentException("The patient's name is required.");
+        if (prescriberName == null || prescriberName.isBlank())
+            throw new IllegalArgumentException("The prescriber's name is required.");
+        if (prescriberLicenseNumber == null || prescriberLicenseNumber.isBlank())
+            throw new IllegalArgumentException("The prescriber's license number is required.");
+        if (prescriptionDate == null || prescriptionDate.isAfter(LocalDate.now()))
+            throw new IllegalArgumentException("The prescription date cannot be in the future.");
+        if (validUntil == null || validUntil.isBefore(LocalDate.now()))
+            throw new IllegalArgumentException("The valid-until date must be today or later.");
+        if (validUntil.isBefore(prescriptionDate))
+            throw new IllegalArgumentException("The valid-until date cannot be before the prescription date.");
+        if (lines == null || lines.isEmpty())
+            throw new IllegalArgumentException("Add at least one prescribed medicine.");
+        String customer = customerID == null ? "" : customerID.trim();
+        List<Map<String, String>> customers = read("data/runtime/accounts/customerDB.csv", CUSTOMER_HEADERS);
+        Map<String, String> customerRow = customers.stream()
+                .filter(row -> customer.equals(row.get("customerID"))).findFirst()
+                .orElseThrow(() -> new IllegalArgumentException("Customer " + customer
+                        + " was not found. Register the customer at the counter first."));
+        if (!"ACTIVE".equals(customerRow.get("status")))
+            throw new IllegalArgumentException("Only active customer accounts can hold prescriptions.");
+
+        List<Map<String, String>> rxItems = new ArrayList<>(
+                read("data/runtime/prescriptions/prescriptionItemsDB.csv", PRESCRIPTION_ITEM_HEADERS));
+        List<Map<String, String>> prescriptions = new ArrayList<>(
+                read("data/runtime/prescriptions/prescriptionsDB.csv", PRESCRIPTION_HEADERS));
+        Map<String, Item> catalog = new HashMap<>();
+        itemRepository.findAll().forEach(item -> catalog.put(item.getItemID(), item));
+        String prescriptionID = nextID(prescriptions, "prescriptionID", "RX-");
+        for (PrescriptionLine line : lines) {
+            if (line == null || line.itemID() == null || line.itemID().isBlank())
+                throw new IllegalArgumentException("Every prescription line needs a medicine.");
+            if (line.quantityPrescribed() <= 0)
+                throw new IllegalArgumentException("Prescribed quantities must be greater than zero.");
+            Item item = catalog.get(line.itemID().trim());
+            if (item == null || item.getStatus() != ItemStatus.ACTIVE)
+                throw new IllegalArgumentException("Medicine " + line.itemID() + " is missing or inactive.");
+            if (!item.isPrescriptionRequired())
+                throw new IllegalArgumentException(item.getItemName()
+                        + " is over-the-counter and does not belong on a prescription.");
+            rxItems.add(row(PRESCRIPTION_ITEM_HEADERS,
+                    "prescriptionItemID", nextID(rxItems, "prescriptionItemID", "RXI-"),
+                    "prescriptionID", prescriptionID,
+                    "itemID", item.getItemID(),
+                    "medicineName", item.getItemName(),
+                    "strength", "", "dosageForm", "",
+                    "directions", line.directions() == null ? "" : line.directions().trim(),
+                    "quantityPrescribed", Integer.toString(line.quantityPrescribed()),
+                    "quantityDispensed", "0"));
+        }
+        prescriptions.add(row(PRESCRIPTION_HEADERS,
+                "prescriptionID", prescriptionID, "customerID", customer,
+                "patientName", patientName.trim(), "prescriberName", prescriberName.trim(),
+                "prescriberLicenseNumber", prescriberLicenseNumber.trim(),
+                "prescriptionDate", prescriptionDate.toString(), "dateReceived", LocalDate.now().toString(),
+                "validUntil", validUntil.toString(), "sourceType", "PAPER",
+                "sourceReference", sourceReference == null ? "" : sourceReference.trim(),
+                "status", "RECEIVED"));
+        List<Map<String, String>> rxLogs = new ArrayList<>(
+                read("data/runtime/logs/prescriptionLogs.csv", PRESCRIPTION_LOG_HEADERS));
+        rxLogs.add(row(PRESCRIPTION_LOG_HEADERS,
+                "logID", nextID(rxLogs, "logID", "LOG-"), "prescriptionID", prescriptionID,
+                "actorID", actorID, "actorRole", actorRole, "action", "REGISTER",
+                "dateTime", LocalDateTime.now().withNano(0).toString(),
+                "reason", "Paper prescription intake", "outcome", "SUCCESS",
+                "relatedRecordID", prescriptionID,
+                "details", "Registered " + lines.size() + " medicine(s) for " + patientName.trim() + "."));
+        writeCoordinator.commit(List.of(
+                new CsvWriteCoordinator.Update(Path.of("data/runtime/prescriptions/prescriptionsDB.csv"),
+                        PRESCRIPTION_HEADERS, prescriptions),
+                new CsvWriteCoordinator.Update(Path.of("data/runtime/prescriptions/prescriptionItemsDB.csv"),
+                        PRESCRIPTION_ITEM_HEADERS, rxItems),
+                new CsvWriteCoordinator.Update(Path.of("data/runtime/logs/prescriptionLogs.csv"),
+                        PRESCRIPTION_LOG_HEADERS, rxLogs)));
+        return prescriptionID;
+    }
+
+    /** Lists verified prescription items a customer can still have dispensed at the counter. */
+    public List<EligibleRxItem> eligiblePrescriptionItems(String customerID) {
+        String customer = customerID == null ? "" : customerID.trim();
+        List<Map<String, String>> prescriptions = read(
+                "data/runtime/prescriptions/prescriptionsDB.csv", PRESCRIPTION_HEADERS);
+        Map<String, Map<String, String>> byPrescription = new HashMap<>();
+        for (Map<String, String> prescription : prescriptions) byPrescription.put(prescription.get("prescriptionID"), prescription);
+        List<Map<String, String>> rxItems = read(
+                "data/runtime/prescriptions/prescriptionItemsDB.csv", PRESCRIPTION_ITEM_HEADERS);
+        List<EligibleRxItem> result = new ArrayList<>();
+        for (Map<String, String> item : rxItems) {
+            Map<String, String> prescription = byPrescription.get(item.get("prescriptionID"));
+            if (prescription == null || !customer.equals(prescription.get("customerID"))) continue;
+            String status = prescription.get("status");
+            if (!"VERIFIED".equals(status) && !"PARTIALLY_DISPENSED".equals(status)) continue;
+            LocalDate validUntil;
+            try {
+                validUntil = LocalDate.parse(prescription.get("validUntil"));
+            } catch (RuntimeException ex) {
+                continue;
+            }
+            if (validUntil.isBefore(LocalDate.now())) continue;
+            int remaining;
+            try {
+                remaining = Integer.parseInt(item.get("quantityPrescribed"))
+                        - Integer.parseInt(item.get("quantityDispensed"));
+            } catch (RuntimeException ex) {
+                continue;
+            }
+            if (remaining <= 0) continue;
+            result.add(new EligibleRxItem(item.get("prescriptionItemID"), item.get("prescriptionID"),
+                    item.get("itemID"), item.getOrDefault("medicineName", item.get("itemID")),
+                    remaining, validUntil));
+        }
+        return result;
+    }
+
     public String reviewPrescription(
             String prescriptionID,
             String newStatus,
@@ -428,6 +693,11 @@ public final class PharmacyScreenService {
             Map<String, String> row = new java.util.LinkedHashMap<>(prescriptions.get(i));
             if (prescriptionID.trim().equals(row.get("prescriptionID"))) {
                 found = true;
+                String currentStatus = row.getOrDefault("status", "");
+                if ("DISPENSED".equals(currentStatus) || "PARTIALLY_DISPENSED".equals(currentStatus)) {
+                    throw new IllegalStateException("Prescription " + prescriptionID.trim() + " is already "
+                            + currentStatus + " and its review is closed.");
+                }
                 String validUntilStr = row.getOrDefault("validUntil", "");
                 if ("VERIFIED".equalsIgnoreCase(newStatus) && !validUntilStr.isBlank()) {
                     LocalDate validUntil = LocalDate.parse(validUntilStr);
@@ -470,56 +740,256 @@ public final class PharmacyScreenService {
         return prescriptionID.trim() + " -> " + newStatus.toUpperCase();
     }
 
+    /**
+     * Cancels a completed sale as one recoverable write: refunds the paid total to the customer account,
+     * returns every sold unit to its original batch, and rolls prescription dispensing back so the
+     * medicine can be dispensed again. The transaction row stays in history marked CANCELLED.
+     */
     public String voidTransaction(String transactionID, String reason, String actorID, String actorRole) {
         if (transactionID == null || transactionID.isBlank()) {
             throw new IllegalArgumentException("Transaction ID is required.");
         }
         if (reason == null || reason.isBlank()) {
-            throw new IllegalArgumentException("A void reason is required for audit records.");
+            throw new IllegalArgumentException("A cancellation reason is required for the audit record.");
+        }
+        if (actorID == null || actorID.isBlank() || actorRole == null || actorRole.isBlank()) {
+            throw new IllegalArgumentException("A signed-in staff member is required.");
+        }
+        if (!"PHARMACIST".equals(actorRole) && !"ADMIN".equals(actorRole)) {
+            throw new IllegalArgumentException("Only pharmacists and administrators can cancel a sale.");
         }
 
+        String normalizedID = transactionID.trim();
         Path txnPath = Path.of("data/runtime/transactions/transactionsDB.csv");
         Path txnLogPath = Path.of("data/runtime/logs/transactionLogs.csv");
+        Path batchPath = Path.of("data/runtime/inventory/batchDB.csv");
+        Path batchLogPath = Path.of("data/runtime/logs/batchLogs.csv");
+        Path txnItemPath = Path.of("data/runtime/transactions/transactionItemsDB.csv");
 
-        List<Map<String, String>> transactions = new ArrayList<>(read("data/runtime/transactions/transactionsDB.csv", TRANSACTION_HEADERS));
-        List<Map<String, String>> txnLogs = new ArrayList<>(read("data/runtime/logs/transactionLogs.csv", TRANSACTION_LOG_HEADERS));
-
-        boolean found = false;
-        String customerID = "";
-        for (int i = 0; i < transactions.size(); i++) {
-            Map<String, String> row = new java.util.LinkedHashMap<>(transactions.get(i));
-            if (transactionID.trim().equals(row.get("transactionID"))) {
-                found = true;
-                if ("CANCELLED".equalsIgnoreCase(row.get("status"))) {
-                    throw new IllegalStateException("Transaction " + transactionID + " is already CANCELLED.");
-                }
-                row.put("status", "CANCELLED");
-                transactions.set(i, row);
+        List<Map<String, String>> transactions = new ArrayList<>(read(txnPath.toString(), TRANSACTION_HEADERS));
+        int txnIndex = -1;
+        for (int index = 0; index < transactions.size(); index++) {
+            if (normalizedID.equals(transactions.get(index).get("transactionID"))) {
+                txnIndex = index;
                 break;
             }
         }
-        if (!found) {
-            throw new IllegalArgumentException("Transaction not found: " + transactionID);
+        if (txnIndex < 0) {
+            throw new IllegalArgumentException("Transaction " + normalizedID + " was not found. Refresh the list.");
+        }
+        Map<String, String> txnRow = new java.util.LinkedHashMap<>(transactions.get(txnIndex));
+        if ("CANCELLED".equalsIgnoreCase(txnRow.getOrDefault("status", ""))) {
+            throw new IllegalStateException("Transaction " + normalizedID + " is already cancelled.");
+        }
+        BigDecimal total;
+        try {
+            total = parseMoney(txnRow.get("totalAmount"));
+        } catch (NumberFormatException ex) {
+            throw new IllegalArgumentException("Transaction " + normalizedID + " has an invalid stored total.");
+        }
+        String customerID = txnRow.getOrDefault("customerID", "").trim();
+        String now = LocalDateTime.now().withNano(0).toString();
+
+        List<Map<String, String>> soldItems = read(txnItemPath.toString(), TRANSACTION_ITEM_HEADERS).stream()
+                .filter(item -> normalizedID.equals(item.get("transactionID")))
+                .toList();
+        if (soldItems.isEmpty()) {
+            throw new IllegalArgumentException("Transaction " + normalizedID
+                    + " has no recorded items, so there is nothing to reverse.");
         }
 
+        // Return every sold unit to its original batch; expired, quarantined, and pulled batches keep their status.
+        List<Map<String, String>> batches = new ArrayList<>(read(batchPath.toString(), BATCH_HEADERS));
+        List<Map<String, String>> batchLogs = new ArrayList<>(read(batchLogPath.toString(), BATCH_LOG_HEADERS));
+        Map<String, Integer> returnedByRxItem = new java.util.LinkedHashMap<>();
+        int returnedUnits = 0;
+        for (Map<String, String> sold : soldItems) {
+            int soldQuantity;
+            try {
+                soldQuantity = Integer.parseInt(sold.getOrDefault("quantity", "0"));
+            } catch (NumberFormatException ex) {
+                throw new IllegalArgumentException("Transaction " + normalizedID + " has an invalid stored item quantity.");
+            }
+            if (soldQuantity <= 0) continue;
+            returnedUnits += soldQuantity;
+            String rxItemID = sold.getOrDefault("prescriptionItemID", "").trim();
+            if (!rxItemID.isEmpty()) returnedByRxItem.merge(rxItemID, soldQuantity, Integer::sum);
+
+            String batchID = sold.getOrDefault("batchID", "").trim();
+            int batchIndex = -1;
+            for (int index = 0; index < batches.size(); index++) {
+                if (batchID.equals(batches.get(index).get("batchID"))) {
+                    batchIndex = index;
+                    break;
+                }
+            }
+            if (batchIndex < 0) {
+                throw new IllegalArgumentException("Batch " + batchID + " behind " + normalizedID
+                        + " no longer exists, so the sale cannot be reversed safely.");
+            }
+            Map<String, String> batchRow = new java.util.LinkedHashMap<>(batches.get(batchIndex));
+            int restocked = Integer.parseInt(batchRow.getOrDefault("quantity", "0")) + soldQuantity;
+            batchRow.put("quantity", Integer.toString(restocked));
+            String batchStatus = batchRow.getOrDefault("status", BatchStatus.ACTIVE.name());
+            if (LocalDate.parse(batchRow.get("expirationDate")).isBefore(LocalDate.now())) {
+                batchRow.put("status", BatchStatus.EXPIRED.name());
+            } else if (BatchStatus.DEPLETED.name().equals(batchStatus) && restocked > 0) {
+                batchRow.put("status", BatchStatus.ACTIVE.name());
+            }
+            batches.set(batchIndex, batchRow);
+            batchLogs.add(row(BATCH_LOG_HEADERS,
+                    "logID", nextID(batchLogs, "logID", "LOG-"), "batchID", batchID,
+                    "itemID", sold.getOrDefault("itemID", ""), "actorID", actorID, "actorRole", actorRole,
+                    "action", "SALE_RETURN", "dateTime", now, "reason", "Cancelled sale " + normalizedID,
+                    "outcome", "SUCCESS", "relatedRecordID", normalizedID,
+                    "details", "Returned " + soldQuantity + " unit(s) to the batch; it now holds " + restocked + "."));
+        }
+
+        // Refund the paid total back to the customer account that was charged.
+        BigDecimal refunded = BigDecimal.ZERO;
+        List<Map<String, String>> customers = new ArrayList<>(
+                read("data/runtime/accounts/customerDB.csv", CUSTOMER_HEADERS));
+        List<Map<String, String>> balanceLogs = new ArrayList<>(
+                read("data/runtime/logs/balanceLogs.csv", BALANCE_LOG_HEADERS));
+        if (!customerID.isEmpty()) {
+            int customerIndex = -1;
+            for (int index = 0; index < customers.size(); index++) {
+                if (customerID.equals(customers.get(index).get("customerID"))) {
+                    customerIndex = index;
+                    break;
+                }
+            }
+            if (customerIndex < 0) {
+                throw new IllegalArgumentException("Customer account " + customerID + " behind " + normalizedID
+                        + " no longer exists, so the sale cannot be refunded.");
+            }
+            Map<String, String> customerRow = new java.util.LinkedHashMap<>(customers.get(customerIndex));
+            BigDecimal balanceBefore;
+            try {
+                balanceBefore = parseMoney(customerRow.get("balance"));
+            } catch (NumberFormatException ex) {
+                throw new IllegalArgumentException("The customer account has an invalid stored balance.");
+            }
+            refunded = total;
+            BigDecimal balanceAfter = balanceBefore.add(refunded);
+            customerRow.put("balance", balanceAfter.toPlainString());
+            customers.set(customerIndex, customerRow);
+            balanceLogs.add(row(BALANCE_LOG_HEADERS,
+                    "logID", nextID(balanceLogs, "logID", "LOG-"), "customerID", customerID,
+                    "actorID", actorID, "actorRole", actorRole,
+                    "action", BalanceLogAction.REFUND.name(), "amount", refunded.toPlainString(),
+                    "balanceBefore", balanceBefore.toPlainString(),
+                    "balanceAfter", balanceAfter.toPlainString(),
+                    "dateTime", now, "reason", reason.trim(), "outcome", "SUCCESS",
+                    "relatedRecordID", normalizedID,
+                    "details", "Refunded the cancelled sale total to the customer balance."));
+        }
+
+        // Roll prescription dispensing back so the remaining allowance becomes sellable again.
+        int rolledBackUnits = 0;
+        List<CsvWriteCoordinator.Update> rxUpdates = new ArrayList<>();
+        if (!returnedByRxItem.isEmpty()) {
+            List<Map<String, String>> rxItems = new ArrayList<>(read(
+                    "data/runtime/prescriptions/prescriptionItemsDB.csv", PRESCRIPTION_ITEM_HEADERS));
+            List<Map<String, String>> prescriptions = new ArrayList<>(read(
+                    "data/runtime/prescriptions/prescriptionsDB.csv", PRESCRIPTION_HEADERS));
+            List<Map<String, String>> rxLogs = new ArrayList<>(read(
+                    "data/runtime/logs/prescriptionLogs.csv", PRESCRIPTION_LOG_HEADERS));
+            java.util.Set<String> touchedPrescriptions = new java.util.LinkedHashSet<>();
+            for (Map.Entry<String, Integer> returned : returnedByRxItem.entrySet()) {
+                int rxItemIndex = -1;
+                for (int index = 0; index < rxItems.size(); index++) {
+                    if (returned.getKey().equals(rxItems.get(index).get("prescriptionItemID"))) {
+                        rxItemIndex = index;
+                        break;
+                    }
+                }
+                if (rxItemIndex < 0) {
+                    throw new IllegalArgumentException("Prescription item " + returned.getKey() + " behind "
+                            + normalizedID + " no longer exists, so the sale cannot be reversed safely.");
+                }
+                Map<String, String> rxItemRow = new java.util.LinkedHashMap<>(rxItems.get(rxItemIndex));
+                int dispensed = Math.max(0,
+                        Integer.parseInt(rxItemRow.getOrDefault("quantityDispensed", "0")) - returned.getValue());
+                rxItemRow.put("quantityDispensed", Integer.toString(dispensed));
+                rxItems.set(rxItemIndex, rxItemRow);
+                touchedPrescriptions.add(rxItemRow.get("prescriptionID"));
+                rolledBackUnits += returned.getValue();
+                rxLogs.add(row(PRESCRIPTION_LOG_HEADERS,
+                        "logID", nextID(rxLogs, "logID", "LOG-"), "prescriptionID", rxItemRow.get("prescriptionID"),
+                        "actorID", actorID, "actorRole", actorRole, "action", "DISPENSE_REVERSED",
+                        "dateTime", now, "reason", "Cancelled sale " + normalizedID, "outcome", "SUCCESS",
+                        "relatedRecordID", normalizedID,
+                        "details", "Rolled back " + returned.getValue() + " dispensed unit(s); "
+                                + Math.max(Integer.parseInt(rxItemRow.get("quantityPrescribed")) - dispensed, 0)
+                                + " unit(s) remain dispensable."));
+            }
+            for (String rxID : touchedPrescriptions) {
+                java.util.List<Map<String, String>> rxRows = rxItems.stream()
+                        .filter(item -> rxID.equals(item.get("prescriptionID")))
+                        .toList();
+                boolean fullyDispensed = rxRows.stream().allMatch(item ->
+                        Integer.parseInt(item.get("quantityDispensed"))
+                                >= Integer.parseInt(item.get("quantityPrescribed")));
+                int dispensedTotal = rxRows.stream()
+                        .mapToInt(item -> Integer.parseInt(item.get("quantityDispensed"))).sum();
+                for (int index = 0; index < prescriptions.size(); index++) {
+                    Map<String, String> prescriptionRow = prescriptions.get(index);
+                    if (!rxID.equals(prescriptionRow.get("prescriptionID"))) continue;
+                    String currentStatus = prescriptionRow.getOrDefault("status", "");
+                    if (!"DISPENSED".equals(currentStatus) && !"PARTIALLY_DISPENSED".equals(currentStatus)) continue;
+                    String newState = fullyDispensed ? "DISPENSED"
+                            : dispensedTotal > 0 ? "PARTIALLY_DISPENSED" : "VERIFIED";
+                    Map<String, String> updatedRow = new java.util.LinkedHashMap<>(prescriptionRow);
+                    updatedRow.put("status", newState);
+                    prescriptions.set(index, updatedRow);
+                    rxLogs.add(row(PRESCRIPTION_LOG_HEADERS,
+                            "logID", nextID(rxLogs, "logID", "LOG-"), "prescriptionID", rxID,
+                            "actorID", actorID, "actorRole", actorRole, "action", "DISPENSE_REVERSED",
+                            "dateTime", now, "reason", "Cancelled sale " + normalizedID, "outcome", "SUCCESS",
+                            "relatedRecordID", normalizedID,
+                            "details", "Prescription reverted to " + newState + " after the sale was cancelled."));
+                }
+            }
+            rxUpdates.add(new CsvWriteCoordinator.Update(
+                    Path.of("data/runtime/prescriptions/prescriptionItemsDB.csv"), PRESCRIPTION_ITEM_HEADERS, rxItems));
+            rxUpdates.add(new CsvWriteCoordinator.Update(
+                    Path.of("data/runtime/prescriptions/prescriptionsDB.csv"), PRESCRIPTION_HEADERS, prescriptions));
+            rxUpdates.add(new CsvWriteCoordinator.Update(
+                    Path.of("data/runtime/logs/prescriptionLogs.csv"), PRESCRIPTION_LOG_HEADERS, rxLogs));
+        }
+
+        txnRow.put("status", TransactionStatus.CANCELLED.name());
+        transactions.set(txnIndex, txnRow);
+        List<String> reversalParts = new ArrayList<>();
+        if (refunded.signum() > 0) reversalParts.add("refunded " + money(refunded) + " to " + customerID);
+        if (returnedUnits > 0) reversalParts.add(returnedUnits + " unit(s) returned to stock");
+        if (rolledBackUnits > 0) reversalParts.add(rolledBackUnits + " prescription unit(s) rolled back");
+        String reversalNote = reversalParts.isEmpty() ? ""
+                : "; " + String.join("; ", reversalParts);
+        List<Map<String, String>> txnLogs = new ArrayList<>(read(txnLogPath.toString(), TRANSACTION_LOG_HEADERS));
         txnLogs.add(row(TRANSACTION_LOG_HEADERS,
-                "logID", nextID(txnLogs, "logID", "LOG-"),
-                "transactionID", transactionID.trim(),
-                "customerID", customerID,
-                "actorID", actorID,
-                "actorRole", actorRole,
-                "action", "VOID_REVERSED",
-                "dateTime", LocalDateTime.now().withNano(0).toString(),
-                "reason", reason.trim(),
-                "outcome", "SUCCESS",
-                "relatedRecordID", transactionID.trim(),
-                "details", "Sale voided; original transaction preserved as CANCELLED"));
+                "logID", nextID(txnLogs, "logID", "LOG-"), "transactionID", normalizedID,
+                "customerID", customerID, "actorID", actorID, "actorRole", actorRole,
+                "action", TransactionLogAction.CANCELLED.name(), "dateTime", now,
+                "reason", reason.trim(), "outcome", "SUCCESS", "relatedRecordID", normalizedID,
+                "details", "Cancelled sale reversed" + reversalNote + "."));
 
-        writeCoordinator.commit(List.of(
-                new CsvWriteCoordinator.Update(txnPath, TRANSACTION_HEADERS, transactions),
-                new CsvWriteCoordinator.Update(txnLogPath, TRANSACTION_LOG_HEADERS, txnLogs)));
+        List<CsvWriteCoordinator.Update> updates = new ArrayList<>();
+        updates.add(new CsvWriteCoordinator.Update(batchPath, BATCH_HEADERS, batches));
+        updates.add(new CsvWriteCoordinator.Update(txnPath, TRANSACTION_HEADERS, transactions));
+        updates.add(new CsvWriteCoordinator.Update(batchLogPath, BATCH_LOG_HEADERS, batchLogs));
+        updates.add(new CsvWriteCoordinator.Update(txnLogPath, TRANSACTION_LOG_HEADERS, txnLogs));
+        if (refunded.signum() > 0) {
+            updates.add(new CsvWriteCoordinator.Update(
+                    Path.of("data/runtime/accounts/customerDB.csv"), CUSTOMER_HEADERS, customers));
+            updates.add(new CsvWriteCoordinator.Update(
+                    Path.of("data/runtime/logs/balanceLogs.csv"), BALANCE_LOG_HEADERS, balanceLogs));
+        }
+        updates.addAll(rxUpdates);
+        writeCoordinator.commit(updates);
 
-        return transactionID.trim();
+        return normalizedID + " was cancelled" + reversalNote + ".";
     }
 
     public String approvePharmacist(String pharmacistID, String adminID) {
@@ -858,18 +1328,40 @@ public final class PharmacyScreenService {
 
     private ScreenData loadPrescriptions() {
         List<Map<String, String>> records = read("data/runtime/prescriptions/prescriptionsDB.csv", PRESCRIPTION_HEADERS);
+        List<Map<String, String>> rxItems = read(
+                "data/runtime/prescriptions/prescriptionItemsDB.csv", PRESCRIPTION_ITEM_HEADERS);
         List<List<String>> rows = records.stream()
                 .sorted(Comparator.comparing((Map<String, String> row) -> row.getOrDefault("dateReceived", ""),
                         Comparator.reverseOrder()))
-                .map(row -> List.of(
-                        safe(row.get("prescriptionID")), safe(row.get("patientName")), safe(row.get("prescriberName")),
-                        safe(row.get("sourceType")), safe(row.get("validUntil")), displayStatus(row.get("status"))))
+                .map(row -> {
+                    List<Map<String, String>> items = rxItems.stream()
+                            .filter(item -> row.get("prescriptionID").equals(item.get("prescriptionID")))
+                            .toList();
+                    int remaining = items.stream()
+                            .mapToInt(item -> Integer.parseInt(item.get("quantityPrescribed"))
+                                    - Integer.parseInt(item.get("quantityDispensed")))
+                            .sum();
+                    String medicines = items.isEmpty() ? "—"
+                            : items.size() + " medicine(s) · " + Math.max(remaining, 0) + " unit(s) left";
+                    return List.of(
+                            safe(row.get("prescriptionID")), safe(row.get("patientName")), safe(row.get("prescriberName")),
+                            safe(row.get("customerID")), safe(row.get("validUntil")), displayStatus(row.get("status")),
+                            medicines);
+                })
                 .toList();
+        long awaiting = records.stream().filter(row -> "RECEIVED".equals(row.get("status"))
+                || "NEEDS_CLARIFICATION".equals(row.get("status"))).count();
+        long ready = records.stream().filter(row -> "VERIFIED".equals(row.get("status"))
+                || "PARTIALLY_DISPENSED".equals(row.get("status"))).count();
+        long dispensed = records.stream().filter(row -> "DISPENSED".equals(row.get("status"))).count();
         return new ScreenData(
-                List.of("PRESCRIPTION", "PATIENT", "PRESCRIBER", "SOURCE", "VALID UNTIL", "STATUS"), rows,
-                List.of(new Metric("PRESCRIPTION RECORDS", Integer.toString(records.size()), "externally issued")),
+                List.of("PRESCRIPTION", "PATIENT", "PRESCRIBER", "CUSTOMER", "VALID UNTIL", "STATUS", "MEDICINES"), rows,
+                List.of(new Metric("PRESCRIPTION RECORDS", Integer.toString(records.size()), "externally issued"),
+                        new Metric("AWAITING REVIEW", Long.toString(awaiting), "need pharmacist decision"),
+                        new Metric("READY TO DISPENSE", Long.toString(ready), "verified with quantity remaining"),
+                        new Metric("FULLY DISPENSED", Long.toString(dispensed), "completed prescriptions")),
                 "No prescription records",
-                "Prescription records will appear here. Original prescription documents stay outside the repository.");
+                "Register paper prescriptions here; original prescription documents stay outside the repository.");
     }
 
     private ScreenData loadTransactions() {
@@ -882,10 +1374,12 @@ public final class PharmacyScreenService {
                         money(parseMoney(row.get("totalAmount"))), displayStatus(row.get("status")), safe(row.get("dateTime"))))
                 .toList();
         long completed = records.stream().filter(row -> "COMPLETED".equals(row.get("status"))).count();
+        long cancelled = records.stream().filter(row -> "CANCELLED".equals(row.get("status"))).count();
         return new ScreenData(
                 List.of("TRANSACTION", "CUSTOMER", "PHARMACIST", "TOTAL", "STATUS", "DATE & TIME"), rows,
                 List.of(new Metric("TRANSACTIONS", Integer.toString(records.size()), "all records"),
-                        new Metric("COMPLETED", Long.toString(completed), "preserved in history")),
+                        new Metric("COMPLETED", Long.toString(completed), "preserved in history"),
+                        new Metric("CANCELLED", Long.toString(cancelled), "refunded and restocked")),
                 "No transactions yet",
                 "Completed and cancelled transactions will appear here.");
     }
