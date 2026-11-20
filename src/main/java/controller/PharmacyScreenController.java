@@ -65,4 +65,17 @@ public final class PharmacyScreenController {
     public String rejectPharmacist(String pharmacistID, String adminID) {
         return screenService.rejectPharmacist(pharmacistID, adminID);
     }
+
+    public String registerPrescription(String customerID, String patientName, String prescriberName,
+            String prescriberLicenseNumber, java.time.LocalDate prescriptionDate, java.time.LocalDate validUntil,
+            String sourceReference, List<PharmacyScreenService.PrescriptionLine> lines,
+            String actorID, String actorRole) {
+        return screenService.registerPrescription(customerID, patientName, prescriberName,
+                prescriberLicenseNumber, prescriptionDate, validUntil, sourceReference, lines,
+                actorID, actorRole);
+    }
+
+    public List<PharmacyScreenService.EligibleRxItem> eligiblePrescriptionItems(String customerID) {
+        return screenService.eligiblePrescriptionItems(customerID);
+    }
 }

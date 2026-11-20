@@ -6,16 +6,20 @@ import model.account.Pharmacist;
 import model.account.StaffStatus;
 import model.account.User;
 import model.account.UserRole;
+import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import repository.csv.CsvFileManager;
 import repository.csv.CsvWriteCoordinator;
 import security.PasswordHasher;
+import service.DemoDataSeeder;
 import service.PharmacyScreenService;
 
 import java.math.BigDecimal;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.LocalDate;
+import java.util.ArrayList;
+import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
@@ -24,6 +28,27 @@ import java.util.stream.Stream;
 import static org.junit.jupiter.api.Assertions.*;
 
 class PharmacySystemTest {
+
+    @BeforeAll
+    static void resetRuntimeData() {
+        Path runtime = Path.of("data/runtime");
+        if (Files.exists(runtime)) {
+            try (Stream<Path> paths = Files.walk(runtime)) {
+                paths.sorted(Comparator.reverseOrder())
+                        .filter(path -> !".gitkeep".equals(path.getFileName().toString()))
+                        .forEach(path -> {
+                            try {
+                                Files.deleteIfExists(path);
+                            } catch (Exception ignored) {
+                                // keep the directory tree; the seeder reuses it
+                            }
+                        });
+            } catch (Exception ignored) {
+                // fall through and seed over whatever remains
+            }
+        }
+        DemoDataSeeder.seedIfEmpty();
+    }
 
     @Test
     void testPasswordHasherVerifiesValidAndRejectsInvalidPasswords() {
@@ -160,5 +185,173 @@ class PharmacySystemTest {
                 service.approvePharmacist("PHR-00002", "ADM-00001"));
         assertThrows(IllegalArgumentException.class, () ->
                 service.rejectPharmacist("PHR-99999", "ADM-00001"));
+    }
+
+    @Test
+    void testRegisterPaperPrescriptionCreatesReceivableRecords() {
+        PharmacyScreenService service = new PharmacyScreenService();
+        String rxID = service.registerPrescription("CUS-00001", "Marco Reyes", "Dr. Iris Chan", "PRC-998877",
+                LocalDate.now().minusDays(1), LocalDate.now().plusDays(30), "PAPER-TEST-001",
+                List.of(new PharmacyScreenService.PrescriptionLine("DEMO-ITEM-007", 10, "Take one tablet daily")),
+                "PHR-00001", "PHARMACIST");
+        assertTrue(rxID.startsWith("RX-"));
+        List<Map<String, String>> prescriptions = new CsvFileManager().readRecords(
+                Path.of("data/runtime/prescriptions/prescriptionsDB.csv"),
+                List.of("prescriptionID", "customerID", "patientName", "prescriberName", "prescriberLicenseNumber",
+                        "prescriptionDate", "dateReceived", "validUntil", "sourceType", "sourceReference", "status"));
+        Map<String, String> saved = prescriptions.stream()
+                .filter(row -> rxID.equals(row.get("prescriptionID"))).findFirst().orElseThrow();
+        assertEquals("RECEIVED", saved.get("status"));
+        assertEquals("PAPER", saved.get("sourceType"));
+        assertEquals("CUS-00001", saved.get("customerID"));
+        List<Map<String, String>> rxItems = new CsvFileManager().readRecords(
+                Path.of("data/runtime/prescriptions/prescriptionItemsDB.csv"),
+                List.of("prescriptionItemID", "prescriptionID", "itemID", "medicineName", "strength", "dosageForm",
+                        "directions", "quantityPrescribed", "quantityDispensed"));
+        Map<String, String> item = rxItems.stream()
+                .filter(row -> rxID.equals(row.get("prescriptionID"))).findFirst().orElseThrow();
+        assertTrue(item.get("prescriptionItemID").startsWith("RXI-"));
+        assertEquals("DEMO-ITEM-007", item.get("itemID"));
+        assertEquals("0", item.get("quantityDispensed"));
+        List<Map<String, String>> logs = new CsvFileManager().readRecords(
+                Path.of("data/runtime/logs/prescriptionLogs.csv"),
+                List.of("logID", "prescriptionID", "actorID", "actorRole", "action", "dateTime",
+                        "reason", "outcome", "relatedRecordID", "details"));
+        assertEquals("REGISTER", logs.get(logs.size() - 1).get("action"));
+
+        assertThrows(IllegalArgumentException.class, () -> service.registerPrescription("CUS-99999",
+                "Ghost Patient", "Dr. Who", "PRC-000000", LocalDate.now(), LocalDate.now().plusDays(5), "",
+                List.of(new PharmacyScreenService.PrescriptionLine("DEMO-ITEM-007", 5, "")),
+                "PHR-00001", "PHARMACIST"));
+        assertThrows(IllegalArgumentException.class, () -> service.registerPrescription("CUS-00001",
+                "Marco Reyes", "Dr. Iris Chan", "PRC-998877", LocalDate.now(), LocalDate.now().minusDays(1), "",
+                List.of(new PharmacyScreenService.PrescriptionLine("DEMO-ITEM-007", 5, "")),
+                "PHR-00001", "PHARMACIST"));
+        assertThrows(IllegalArgumentException.class, () -> service.registerPrescription("CUS-00001",
+                "Marco Reyes", "Dr. Iris Chan", "PRC-998877", LocalDate.now(), LocalDate.now().plusDays(5), "",
+                List.of(new PharmacyScreenService.PrescriptionLine("DEMO-ITEM-001", 5, "")),
+                "PHR-00001", "PHARMACIST"));
+    }
+
+    @Test
+    void testPrescriptionSaleRequiresVerifiedLinkAndRespectsQuantity() {
+        PharmacyScreenService service = new PharmacyScreenService();
+        String rxID = service.registerPrescription("CUS-00001", "Nina Dolores", "Dr. Iris Chan", "PRC-998877",
+                LocalDate.now(), LocalDate.now().plusDays(14), "",
+                List.of(new PharmacyScreenService.PrescriptionLine("DEMO-ITEM-008", 5, "")),
+                "PHR-00001", "PHARMACIST");
+        String rxItemID = new CsvFileManager().readRecords(
+                Path.of("data/runtime/prescriptions/prescriptionItemsDB.csv"),
+                List.of("prescriptionItemID", "prescriptionID", "itemID", "medicineName", "strength", "dosageForm",
+                        "directions", "quantityPrescribed", "quantityDispensed")).stream()
+                .filter(row -> rxID.equals(row.get("prescriptionID"))).findFirst().orElseThrow()
+                .get("prescriptionItemID");
+
+        assertThrows(IllegalArgumentException.class, () -> service.completeSale("CUS-00001",
+                List.of(new PharmacyScreenService.SaleLine("DEMO-ITEM-008", 1)), "PHR-00001", "PHARMACIST"));
+        assertThrows(IllegalArgumentException.class, () -> service.completeSale("CUS-00001",
+                List.of(new PharmacyScreenService.SaleLine("DEMO-ITEM-008", 1, rxItemID)), "PHR-00001", "PHARMACIST"));
+        service.reviewPrescription(rxID, "VERIFIED", "License confirmed", "PHR-00001", "PHARMACIST");
+        assertThrows(IllegalArgumentException.class, () -> service.completeSale("CUS-00001",
+                List.of(new PharmacyScreenService.SaleLine("DEMO-ITEM-008", 6, rxItemID)), "PHR-00001", "PHARMACIST"));
+    }
+
+    @Test
+    void testVerifiedPrescriptionSaleDispensesPartiallyThenFully() {
+        PharmacyScreenService service = new PharmacyScreenService();
+        String rxID = service.registerPrescription("CUS-00001", "Kai Mendoza", "Dr. Iris Chan", "PRC-998877",
+                LocalDate.now(), LocalDate.now().plusDays(21), "",
+                List.of(new PharmacyScreenService.PrescriptionLine("DEMO-ITEM-007", 10, "")),
+                "PHR-00001", "PHARMACIST");
+        service.reviewPrescription(rxID, "VERIFIED", "License confirmed", "PHR-00001", "PHARMACIST");
+        String rxItemID = new CsvFileManager().readRecords(
+                Path.of("data/runtime/prescriptions/prescriptionItemsDB.csv"),
+                List.of("prescriptionItemID", "prescriptionID", "itemID", "medicineName", "strength", "dosageForm",
+                        "directions", "quantityPrescribed", "quantityDispensed")).stream()
+                .filter(row -> rxID.equals(row.get("prescriptionID"))).findFirst().orElseThrow()
+                .get("prescriptionItemID");
+        assertTrue(service.eligiblePrescriptionItems("CUS-00001").stream()
+                .anyMatch(rx -> rx.prescriptionItemID().equals(rxItemID)));
+
+        String firstSale = service.completeSale("CUS-00001",
+                List.of(new PharmacyScreenService.SaleLine("DEMO-ITEM-007", 4, rxItemID)), "PHR-00001", "PHARMACIST");
+        assertNotNull(firstSale);
+        List<Map<String, String>> rxItems = new CsvFileManager().readRecords(
+                Path.of("data/runtime/prescriptions/prescriptionItemsDB.csv"),
+                List.of("prescriptionItemID", "prescriptionID", "itemID", "medicineName", "strength", "dosageForm",
+                        "directions", "quantityPrescribed", "quantityDispensed"));
+        assertEquals("4", rxItems.stream()
+                .filter(row -> rxItemID.equals(row.get("prescriptionItemID"))).findFirst().orElseThrow()
+                .get("quantityDispensed"));
+        List<Map<String, String>> prescriptions = new CsvFileManager().readRecords(
+                Path.of("data/runtime/prescriptions/prescriptionsDB.csv"),
+                List.of("prescriptionID", "customerID", "patientName", "prescriberName", "prescriberLicenseNumber",
+                        "prescriptionDate", "dateReceived", "validUntil", "sourceType", "sourceReference", "status"));
+        assertEquals("PARTIALLY_DISPENSED", prescriptions.stream()
+                .filter(row -> rxID.equals(row.get("prescriptionID"))).findFirst().orElseThrow().get("status"));
+        List<Map<String, String>> txnItems = new CsvFileManager().readRecords(
+                Path.of("data/runtime/transactions/transactionItemsDB.csv"),
+                List.of("transactionItemID", "transactionID", "itemID", "batchID", "prescriptionItemID",
+                        "quantity", "unitPrice", "subtotal"));
+        assertTrue(txnItems.stream().anyMatch(row -> firstSale.equals(row.get("transactionID"))
+                && rxItemID.equals(row.get("prescriptionItemID"))));
+
+        service.completeSale("CUS-00001",
+                List.of(new PharmacyScreenService.SaleLine("DEMO-ITEM-007", 6, rxItemID)), "PHR-00001", "PHARMACIST");
+        List<Map<String, String>> rxItemsAfterSecondSale = new CsvFileManager().readRecords(
+                Path.of("data/runtime/prescriptions/prescriptionItemsDB.csv"),
+                List.of("prescriptionItemID", "prescriptionID", "itemID", "medicineName", "strength", "dosageForm",
+                        "directions", "quantityPrescribed", "quantityDispensed"));
+        assertEquals("10", rxItemsAfterSecondSale.stream()
+                .filter(row -> rxItemID.equals(row.get("prescriptionItemID"))).findFirst().orElseThrow()
+                .get("quantityDispensed"));
+        assertEquals("DISPENSED", new CsvFileManager().readRecords(
+                Path.of("data/runtime/prescriptions/prescriptionsDB.csv"),
+                List.of("prescriptionID", "customerID", "patientName", "prescriberName", "prescriberLicenseNumber",
+                        "prescriptionDate", "dateReceived", "validUntil", "sourceType", "sourceReference", "status"))
+                .stream().filter(row -> rxID.equals(row.get("prescriptionID"))).findFirst().orElseThrow().get("status"));
+        assertTrue(service.eligiblePrescriptionItems("CUS-00001").stream()
+                .noneMatch(rx -> rx.prescriptionItemID().equals(rxItemID)));
+        assertThrows(IllegalArgumentException.class, () -> service.completeSale("CUS-00001",
+                List.of(new PharmacyScreenService.SaleLine("DEMO-ITEM-007", 1, rxItemID)), "PHR-00001", "PHARMACIST"));
+    }
+
+    @Test
+    void testExpiredPrescriptionCannotBeDispensed() {
+        PharmacyScreenService service = new PharmacyScreenService();
+        String rxID = service.registerPrescription("CUS-00001", "Ruth Villanueva", "Dr. Iris Chan", "PRC-998877",
+                LocalDate.now(), LocalDate.now().plusDays(5), "",
+                List.of(new PharmacyScreenService.PrescriptionLine("DEMO-ITEM-008", 6, "")),
+                "PHR-00001", "PHARMACIST");
+        service.reviewPrescription(rxID, "VERIFIED", "License confirmed", "PHR-00001", "PHARMACIST");
+        String rxItemID = new CsvFileManager().readRecords(
+                Path.of("data/runtime/prescriptions/prescriptionItemsDB.csv"),
+                List.of("prescriptionItemID", "prescriptionID", "itemID", "medicineName", "strength", "dosageForm",
+                        "directions", "quantityPrescribed", "quantityDispensed")).stream()
+                .filter(row -> rxID.equals(row.get("prescriptionID"))).findFirst().orElseThrow()
+                .get("prescriptionItemID");
+
+        List<Map<String, String>> prescriptions = new ArrayList<>(new CsvFileManager().readRecords(
+                Path.of("data/runtime/prescriptions/prescriptionsDB.csv"),
+                List.of("prescriptionID", "customerID", "patientName", "prescriberName", "prescriberLicenseNumber",
+                        "prescriptionDate", "dateReceived", "validUntil", "sourceType", "sourceReference", "status")));
+        for (int index = 0; index < prescriptions.size(); index++) {
+            if (rxID.equals(prescriptions.get(index).get("prescriptionID"))) {
+                Map<String, String> updated = new java.util.LinkedHashMap<>(prescriptions.get(index));
+                updated.put("validUntil", LocalDate.now().minusDays(1).toString());
+                prescriptions.set(index, updated);
+            }
+        }
+        new CsvWriteCoordinator().commit(List.of(new CsvWriteCoordinator.Update(
+                Path.of("data/runtime/prescriptions/prescriptionsDB.csv"),
+                List.of("prescriptionID", "customerID", "patientName", "prescriberName", "prescriberLicenseNumber",
+                        "prescriptionDate", "dateReceived", "validUntil", "sourceType", "sourceReference", "status"),
+                prescriptions)));
+
+        IllegalArgumentException thrown = assertThrows(IllegalArgumentException.class, () ->
+                service.completeSale("CUS-00001",
+                        List.of(new PharmacyScreenService.SaleLine("DEMO-ITEM-008", 1, rxItemID)),
+                        "PHR-00001", "PHARMACIST"));
+        assertTrue(thrown.getMessage().contains("expired"));
     }
 }
