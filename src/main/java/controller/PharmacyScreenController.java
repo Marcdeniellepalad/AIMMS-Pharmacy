@@ -39,4 +39,17 @@ public final class PharmacyScreenController {
             String lotNumber, java.time.LocalDate expirationDate) {
         return screenService.approveRestockRequest(requestID, adminID, quantityReceived, lotNumber, expirationDate);
     }
+
+    public String reviewPrescription(String prescriptionID, String newStatus, String notes,
+            String actorID, String actorRole) {
+        return screenService.reviewPrescription(prescriptionID, newStatus, notes, actorID, actorRole);
+    }
+
+    public String voidTransaction(String transactionID, String reason, String actorID, String actorRole) {
+        return screenService.voidTransaction(transactionID, reason, actorID, actorRole);
+    }
+
+    public String approvePharmacist(String pharmacistID, String adminID) {
+        return screenService.approvePharmacist(pharmacistID, adminID);
+    }
 }
