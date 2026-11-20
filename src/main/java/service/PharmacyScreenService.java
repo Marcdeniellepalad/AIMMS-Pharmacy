@@ -96,7 +96,9 @@ public final class PharmacyScreenService {
             "logID", "customerID", "actorID", "actorRole", "action", "amount", "balanceBefore",
             "balanceAfter", "dateTime", "reason", "outcome", "relatedRecordID", "details");
     private static final List<String> PRESCRIPTION_LOG_HEADERS = List.of(
+            
             "logID", "prescriptionID", "actorID", "actorRole", "action", "dateTime",
+           
             "reason", "outcome", "relatedRecordID", "details");
 
     private final ItemRepository itemRepository;
