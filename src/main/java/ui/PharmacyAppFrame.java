@@ -17,8 +17,6 @@ import java.awt.Insets;
 import java.awt.RenderingHints;
 import java.awt.Rectangle;
 import java.awt.Window;
-import java.awt.event.ActionEvent;
-import java.awt.event.ActionListener;
 import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.time.format.TextStyle;
@@ -33,7 +31,6 @@ import javax.swing.AbstractButton;
 import javax.swing.BorderFactory;
 import javax.swing.Box;
 import javax.swing.BoxLayout;
-import javax.swing.DefaultComboBoxModel;
 import javax.swing.DefaultListModel;
 import javax.swing.Icon;
 import javax.swing.JButton;
@@ -46,7 +43,6 @@ import javax.swing.JList;
 import javax.swing.JOptionPane;
 import javax.swing.JPanel;
 import javax.swing.JPasswordField;
-import javax.swing.JProgressBar;
 import javax.swing.JScrollPane;
 import javax.swing.JTable;
 import javax.swing.JTextField;
@@ -58,7 +54,6 @@ import javax.swing.event.DocumentEvent;
 import javax.swing.event.DocumentListener;
 import javax.swing.table.DefaultTableCellRenderer;
 import javax.swing.table.DefaultTableModel;
-import javax.swing.table.TableModel;
 import javax.swing.table.TableRowSorter;
 import model.inventory.ItemStatus;
 import service.PharmacyScreenService;
@@ -73,15 +68,26 @@ import model.account.UserRole;
 /** Desktop workspace for inventory, account review, and pharmacy audit screens. */
 public final class PharmacyAppFrame extends JFrame {
 
+    // Palette: Maroon primary + Warm Amber-Bronze secondary accent
     private static final Color CANVAS = new Color(0xF4, 0xEF, 0xED);
     private static final Color WHITE = Color.WHITE;
     private static final Color MAROON = new Color(0x7A, 0x12, 0x16);
+    private static final Color AMBER = new Color(0x8C, 0x53, 0x19);
+    private static final Color AMBER_SOFT = new Color(0xFD, 0xF6, 0xEC);
     private static final Color TEXT = new Color(0x29, 0x23, 0x22);
     private static final Color MUTED = new Color(0x82, 0x79, 0x76);
     private static final Color BORDER = new Color(0xE6, 0xDE, 0xDB);
     private static final Color SOFT = new Color(0xFA, 0xF7, 0xF6);
     private static final Color SKELETON = new Color(0xE9, 0xE5, 0xE3);
-    private static final Font UI_FONT = new Font("Segoe UI", Font.PLAIN, 13);
+
+    // Type scale
+    private static final Font FONT_PAGE_TITLE = new Font("Segoe UI", Font.BOLD, 26);
+    private static final Font FONT_SECTION_TITLE = new Font("Segoe UI", Font.BOLD, 17);
+    private static final Font FONT_METRIC_VALUE = new Font("Segoe UI", Font.BOLD, 22);
+    private static final Font FONT_BODY = new Font("Segoe UI", Font.PLAIN, 13);
+    private static final Font FONT_SUB = new Font("Segoe UI", Font.PLAIN, 12);
+    private static final Font FONT_MICRO = new Font("Segoe UI", Font.BOLD, 10);
+    private static final Font UI_FONT = FONT_BODY;
 
     private final PharmacyScreenController controller = new PharmacyScreenController();
     private final AuthenticationService authenticationService = new AuthenticationService();
@@ -127,114 +133,205 @@ public final class PharmacyAppFrame extends JFrame {
     private JPanel buildLoginPanel() {
         JPanel background = new JPanel(new GridBagLayout());
         background.setBackground(CANVAS);
+        background.setBorder(BorderFactory.createEmptyBorder(24, 24, 24, 24));
+
         JPanel card = new JPanel(new BorderLayout());
         card.setBackground(WHITE);
-        card.setPreferredSize(new Dimension(900, 540));
-        card.setBorder(BorderFactory.createLineBorder(BORDER));
+        card.setPreferredSize(new Dimension(940, 560));
+        card.setMinimumSize(new Dimension(780, 500));
+        card.setBorder(BorderFactory.createCompoundBorder(
+                BorderFactory.createLineBorder(new Color(0xD8, 0xCE, 0xCA), 1),
+                BorderFactory.createMatteBorder(0, 0, 3, 0, new Color(0xE2, 0xD8, 0xD4))));
 
         JPanel welcome = new JPanel();
         welcome.setBackground(MAROON);
-        welcome.setPreferredSize(new Dimension(330, 540));
-        welcome.setBorder(BorderFactory.createEmptyBorder(44, 38, 38, 38));
+        welcome.setPreferredSize(new Dimension(340, 0));
+        welcome.setBorder(BorderFactory.createEmptyBorder(44, 38, 36, 38));
         welcome.setLayout(new BoxLayout(welcome, BoxLayout.Y_AXIS));
+
+        JPanel logoBadge = new JPanel(new BorderLayout());
+        logoBadge.setBackground(WHITE);
+        logoBadge.setPreferredSize(new Dimension(48, 48));
+        logoBadge.setMaximumSize(new Dimension(48, 48));
+        logoBadge.setAlignmentX(Component.LEFT_ALIGNMENT);
         JLabel logo = new JLabel("Rx", SwingConstants.CENTER);
-        logo.setOpaque(true);
-        logo.setBackground(WHITE);
         logo.setForeground(MAROON);
-        logo.setFont(new Font("Segoe UI", Font.BOLD, 16));
-        logo.setPreferredSize(new Dimension(46, 46));
-        logo.setMaximumSize(new Dimension(46, 46));
-        logo.setAlignmentX(Component.LEFT_ALIGNMENT);
-        welcome.add(logo);
+        logo.setFont(new Font("Segoe UI", Font.BOLD, 18));
+        logoBadge.add(logo, BorderLayout.CENTER);
+
         JLabel brand = new JLabel("AIMMs Pharmacy");
-        brand.setFont(new Font("Segoe UI", Font.BOLD, 14));
+        brand.setFont(new Font("Segoe UI", Font.BOLD, 16));
         brand.setForeground(WHITE);
-        brand.setBorder(BorderFactory.createEmptyBorder(17, 0, 0, 0));
+        brand.setBorder(BorderFactory.createEmptyBorder(18, 0, 0, 0));
         brand.setAlignmentX(Component.LEFT_ALIGNMENT);
-        welcome.add(brand);
-        JLabel tagline = new JLabel("COUNTER SYSTEM");
+
+        JLabel tagline = new JLabel("COUNTER & INVENTORY SYSTEM");
         tagline.setFont(new Font("Segoe UI", Font.BOLD, 9));
         tagline.setForeground(new Color(0xF1, 0xD8, 0xD7));
         tagline.setAlignmentX(Component.LEFT_ALIGNMENT);
-        welcome.add(Box.createVerticalStrut(4));
-        welcome.add(tagline);
+
         JLabel headline = new JLabel("<html>Good care starts<br>with a clear counter.</html>");
-        headline.setFont(new Font("Segoe UI", Font.BOLD, 27));
+        headline.setFont(new Font("Segoe UI", Font.BOLD, 28));
         headline.setForeground(WHITE);
         headline.setAlignmentX(Component.LEFT_ALIGNMENT);
-        headline.setBorder(BorderFactory.createEmptyBorder(43, 0, 0, 0));
-        welcome.add(headline);
-        JLabel description = new JLabel("<html>Manage medicine, prescriptions, and sales<br>in one pharmacy workspace.</html>");
-        description.setFont(new Font("Segoe UI", Font.PLAIN, 13));
+        headline.setBorder(BorderFactory.createEmptyBorder(36, 0, 0, 0));
+
+        JLabel description = new JLabel("<html>Verify prescriptions, dispense FEFO stock, and audit counter transactions in one workspace.</html>");
+        description.setFont(FONT_BODY);
         description.setForeground(new Color(0xF5, 0xE7, 0xE6));
         description.setAlignmentX(Component.LEFT_ALIGNMENT);
-        description.setBorder(BorderFactory.createEmptyBorder(13, 0, 0, 0));
-        welcome.add(description);
-        welcome.add(Box.createVerticalGlue());
-        JLabel privacy = new JLabel("Staff access · Pharmacy records");
-        privacy.setFont(new Font("Segoe UI", Font.PLAIN, 10));
+        description.setBorder(BorderFactory.createEmptyBorder(14, 0, 0, 0));
+
+        JLabel privacy = new JLabel("<html><span style='color:#F1D8D7;'>●</span> Local CSV Audit Workspace · Staff Only</html>");
+        privacy.setFont(FONT_SUB);
         privacy.setForeground(new Color(0xF1, 0xD8, 0xD7));
         privacy.setAlignmentX(Component.LEFT_ALIGNMENT);
+
+        welcome.add(logoBadge);
+        welcome.add(brand);
+        welcome.add(Box.createVerticalStrut(4));
+        welcome.add(tagline);
+        welcome.add(headline);
+        welcome.add(description);
+        welcome.add(Box.createVerticalGlue());
         welcome.add(privacy);
         card.add(welcome, BorderLayout.WEST);
 
         JPanel form = new JPanel();
         form.setBackground(WHITE);
-        form.setBorder(BorderFactory.createEmptyBorder(46, 48, 38, 48));
+        form.setBorder(BorderFactory.createEmptyBorder(42, 54, 36, 54));
         form.setLayout(new BoxLayout(form, BoxLayout.Y_AXIS));
+
         JLabel eyebrow = new JLabel("STAFF WORKSPACE");
-        eyebrow.setFont(new Font("Segoe UI", Font.BOLD, 10));
+        eyebrow.setFont(FONT_MICRO);
         eyebrow.setForeground(MAROON);
+        eyebrow.setAlignmentX(Component.LEFT_ALIGNMENT);
+
         JLabel title = new JLabel("Sign in");
-        title.setFont(new Font("Segoe UI", Font.BOLD, 25));
+        title.setFont(new Font("Segoe UI", Font.BOLD, 27));
         title.setForeground(TEXT);
-        title.setBorder(BorderFactory.createEmptyBorder(7, 0, 5, 0));
-        JLabel instruction = new JLabel("Use your administrator or pharmacist account.");
+        title.setAlignmentX(Component.LEFT_ALIGNMENT);
+        title.setBorder(BorderFactory.createEmptyBorder(4, 0, 4, 0));
+
+        JLabel instruction = new JLabel("Enter your approved administrator or pharmacist credentials.");
         instruction.setFont(UI_FONT);
         instruction.setForeground(MUTED);
-        form.add(eyebrow);
-        form.add(title);
-        form.add(instruction);
-        form.add(Box.createVerticalStrut(27));
+        instruction.setAlignmentX(Component.LEFT_ALIGNMENT);
+
+        JPanel alertBanner = new JPanel(new BorderLayout());
+        alertBanner.setBackground(new Color(0xFD, 0xF2, 0xF2));
+        alertBanner.setBorder(BorderFactory.createCompoundBorder(
+                BorderFactory.createLineBorder(new Color(0xE5, 0xA9, 0xA8)),
+                BorderFactory.createEmptyBorder(9, 12, 9, 12)));
+        alertBanner.setAlignmentX(Component.LEFT_ALIGNMENT);
+        alertBanner.setMaximumSize(new Dimension(Integer.MAX_VALUE, 46));
+        alertBanner.setVisible(false);
+
+        JLabel message = new JLabel("");
+        message.setFont(new Font("Segoe UI", Font.BOLD, 12));
+        message.setForeground(new Color(0x9E, 0x2A, 0x28));
+        alertBanner.add(message, BorderLayout.CENTER);
 
         JLabel usernameLabel = new JLabel("Username");
         styleFormLabel(usernameLabel);
         JTextField username = new JTextField();
-        styleLoginField(username);
+        styleInteractiveLoginField(username);
         username.getAccessibleContext().setAccessibleName("Username");
+
         JLabel passwordLabel = new JLabel("Password");
         styleFormLabel(passwordLabel);
-        passwordLabel.setBorder(BorderFactory.createEmptyBorder(17, 0, 7, 0));
+        passwordLabel.setBorder(BorderFactory.createEmptyBorder(14, 0, 0, 0));
         JPasswordField password = new JPasswordField();
-        styleLoginField(password);
+        styleInteractiveLoginField(password);
         password.getAccessibleContext().setAccessibleName("Password");
+
         JCheckBox showPassword = new JCheckBox("Show password");
         showPassword.setBackground(WHITE);
         showPassword.setForeground(MUTED);
-        showPassword.setFont(new Font("Segoe UI", Font.PLAIN, 11));
+        showPassword.setFont(FONT_SUB);
+        showPassword.setAlignmentX(Component.LEFT_ALIGNMENT);
+        showPassword.setBorder(BorderFactory.createEmptyBorder(8, 0, 0, 0));
+        showPassword.setCursor(java.awt.Cursor.getPredefinedCursor(java.awt.Cursor.HAND_CURSOR));
         char echo = password.getEchoChar();
-        showPassword.addActionListener(event -> password.setEchoChar(showPassword.isSelected() ? '\0' : echo));
+        showPassword.addActionListener(event ->
+                password.setEchoChar(showPassword.isSelected() ? '\0' : echo));
+
+        JButton signIn = primaryButton("Sign in to workspace");
+        signIn.setAlignmentX(Component.LEFT_ALIGNMENT);
+        signIn.setMaximumSize(new Dimension(Integer.MAX_VALUE, 44));
+
+        JLabel note = new JLabel("<html>Need an account or password reset? Contact a pharmacy administrator.</html>");
+        note.setFont(FONT_SUB);
+        note.setForeground(MUTED);
+        note.setAlignmentX(Component.LEFT_ALIGNMENT);
+
+        form.add(eyebrow);
+        form.add(title);
+        form.add(instruction);
+        form.add(Box.createVerticalStrut(16));
+        form.add(alertBanner);
+        form.add(Box.createVerticalStrut(12));
         form.add(usernameLabel);
-        form.add(Box.createVerticalStrut(7));
+        form.add(Box.createVerticalStrut(6));
         form.add(username);
         form.add(passwordLabel);
+        form.add(Box.createVerticalStrut(6));
         form.add(password);
-        showPassword.setBorder(BorderFactory.createEmptyBorder(8, 0, 0, 0));
         form.add(showPassword);
+        form.add(Box.createVerticalStrut(18));
+        form.add(signIn);
+        form.add(Box.createVerticalStrut(16));
+        form.add(note);
 
-        JLabel message = new JLabel(" ");
-        message.setFont(new Font("Segoe UI", Font.PLAIN, 11));
-        message.setForeground(new Color(0xA7, 0x38, 0x35));
-        message.setBorder(BorderFactory.createEmptyBorder(6, 0, 3, 0));
-        form.add(message);
-        JButton signIn = primaryButton("Sign in");
-        signIn.setAlignmentX(Component.LEFT_ALIGNMENT);
-        signIn.setMaximumSize(new Dimension(Integer.MAX_VALUE, 42));
+        if (demoMode) {
+            JPanel demoBar = new JPanel(new FlowLayout(FlowLayout.LEFT, 8, 6));
+            demoBar.setBackground(SOFT);
+            demoBar.setBorder(BorderFactory.createCompoundBorder(
+                    BorderFactory.createLineBorder(BORDER),
+                    BorderFactory.createEmptyBorder(4, 8, 4, 8)));
+            demoBar.setAlignmentX(Component.LEFT_ALIGNMENT);
+            demoBar.setMaximumSize(new Dimension(Integer.MAX_VALUE, 44));
+
+            JLabel demoLabel = new JLabel("Quick demo fill:");
+            demoLabel.setFont(FONT_MICRO);
+            demoLabel.setForeground(MUTED);
+
+            JButton fillAdmin = smallButton("Admin");
+            fillAdmin.setPreferredSize(new Dimension(68, 26));
+            fillAdmin.addActionListener(e -> {
+                username.setText("admin");
+                password.setText("AIMMsDemo1!");
+                alertBanner.setVisible(false);
+            });
+
+            JButton fillPharm = smallButton("Pharmacist");
+            fillPharm.setPreferredSize(new Dimension(88, 26));
+            fillPharm.addActionListener(e -> {
+                username.setText("pharmacist");
+                password.setText("AIMMsDemo1!");
+                alertBanner.setVisible(false);
+            });
+
+            demoBar.add(demoLabel);
+            demoBar.add(fillAdmin);
+            demoBar.add(fillPharm);
+            form.add(Box.createVerticalStrut(14));
+            form.add(demoBar);
+        }
+
         signIn.addActionListener(event -> {
             signIn.setEnabled(false);
+            username.setEnabled(false);
+            password.setEnabled(false);
             signIn.setText("Signing in…");
-            message.setForeground(MUTED);
-            message.setText("Checking your staff account…");
+            alertBanner.setBackground(SOFT);
+            alertBanner.setBorder(BorderFactory.createCompoundBorder(
+                    BorderFactory.createLineBorder(BORDER),
+                    BorderFactory.createEmptyBorder(9, 12, 9, 12)));
+            message.setForeground(TEXT);
+            message.setText("Verifying your staff credentials…");
+            alertBanner.setVisible(true);
+
             String enteredUsername = username.getText();
             char[] enteredPassword = password.getPassword();
             new SwingWorker<UserSession, Void>() {
@@ -249,49 +346,71 @@ public final class PharmacyAppFrame extends JFrame {
                         enterWorkspace(get());
                     } catch (InterruptedException ex) {
                         Thread.currentThread().interrupt();
-                        showLoginError(message, password, "Sign in was interrupted. Please try again.");
+                        showLoginAlert(alertBanner, message, password, "Sign in was interrupted. Please try again.");
                     } catch (ExecutionException ex) {
                         Throwable cause = ex.getCause();
                         if (cause instanceof AuthenticationService.AuthenticationException authError) {
-                            showLoginError(message, password, authError.getMessage());
+                            showLoginAlert(alertBanner, message, password, authError.getMessage());
                         } else {
-                            showLoginError(message, password,
+                            showLoginAlert(alertBanner, message, password,
                                     "Staff records could not be read. Check the account CSV files.");
                         }
                     } finally {
+                        username.setEnabled(true);
+                        password.setEnabled(true);
                         signIn.setEnabled(true);
-                        signIn.setText("Sign in");
+                        signIn.setText("Sign in to workspace");
                     }
                 }
             }.execute();
         });
-        form.add(Box.createVerticalStrut(8));
-        form.add(signIn);
-        form.add(Box.createVerticalStrut(19));
-        JLabel note = new JLabel("<html>Access is based on your approved staff account.<br>Need access? Contact a pharmacy administrator.</html>");
-        note.setFont(new Font("Segoe UI", Font.PLAIN, 11));
-        note.setForeground(MUTED);
-        form.add(note);
-        if (demoMode) {
-            JLabel demo = new JLabel("<html><b>Demo access</b><br>Admin: admin · Pharmacist: pharmacist<br>Password for both: AIMMsDemo1!</html>");
-            demo.setFont(new Font("Segoe UI", Font.PLAIN, 10));
-            demo.setForeground(new Color(0x68, 0x5D, 0x59));
-            demo.setBorder(BorderFactory.createCompoundBorder(
-                    BorderFactory.createLineBorder(BORDER), BorderFactory.createEmptyBorder(10, 12, 10, 12)));
-            demo.setAlignmentX(Component.LEFT_ALIGNMENT);
-            demo.setMaximumSize(new Dimension(Integer.MAX_VALUE, 70));
-            form.add(Box.createVerticalStrut(18));
-            form.add(demo);
-        }
+
         card.add(form, BorderLayout.CENTER);
         background.add(card);
-        getRootPane().setDefaultButton(signIn);
+        java.awt.EventQueue.invokeLater(() -> {
+            if (getRootPane() != null) {
+                getRootPane().setDefaultButton(signIn);
+            }
+            username.requestFocusInWindow();
+        });
         return background;
     }
 
-    private void showLoginError(JLabel message, JPasswordField password, String text) {
-        message.setForeground(new Color(0xA7, 0x38, 0x35));
+    private void styleInteractiveLoginField(JTextField field) {
+        field.setFont(new Font("Segoe UI", Font.PLAIN, 14));
+        field.setForeground(TEXT);
+        field.setBackground(SOFT);
+        javax.swing.border.Border normalBorder = BorderFactory.createCompoundBorder(
+                BorderFactory.createLineBorder(BORDER, 1),
+                BorderFactory.createEmptyBorder(10, 12, 10, 12));
+        javax.swing.border.Border focusBorder = BorderFactory.createCompoundBorder(
+                BorderFactory.createLineBorder(MAROON, 2),
+                BorderFactory.createEmptyBorder(9, 11, 9, 11));
+        field.setBorder(normalBorder);
+        field.setMaximumSize(new Dimension(Integer.MAX_VALUE, 44));
+        field.setAlignmentX(Component.LEFT_ALIGNMENT);
+        field.addFocusListener(new java.awt.event.FocusAdapter() {
+            @Override
+            public void focusGained(java.awt.event.FocusEvent e) {
+                field.setBackground(WHITE);
+                field.setBorder(focusBorder);
+            }
+            @Override
+            public void focusLost(java.awt.event.FocusEvent e) {
+                field.setBackground(SOFT);
+                field.setBorder(normalBorder);
+            }
+        });
+    }
+
+    private void showLoginAlert(JPanel banner, JLabel message, JPasswordField password, String text) {
+        banner.setBackground(new Color(0xFD, 0xF2, 0xF2));
+        banner.setBorder(BorderFactory.createCompoundBorder(
+                BorderFactory.createLineBorder(new Color(0xE5, 0xA9, 0xA8)),
+                BorderFactory.createEmptyBorder(9, 12, 9, 12)));
+        message.setForeground(new Color(0x9E, 0x2A, 0x28));
         message.setText(text);
+        banner.setVisible(true);
         password.setText("");
         password.requestFocusInWindow();
     }
@@ -308,19 +427,9 @@ public final class PharmacyAppFrame extends JFrame {
     }
 
     private void styleFormLabel(JLabel label) {
-        label.setFont(new Font("Segoe UI", Font.BOLD, 11));
+        label.setFont(FONT_MICRO);
         label.setForeground(TEXT);
         label.setAlignmentX(Component.LEFT_ALIGNMENT);
-    }
-
-    private void styleLoginField(JTextField field) {
-        field.setFont(UI_FONT);
-        field.setForeground(TEXT);
-        field.setBackground(SOFT);
-        field.setBorder(BorderFactory.createCompoundBorder(
-                BorderFactory.createLineBorder(BORDER), BorderFactory.createEmptyBorder(10, 12, 10, 12)));
-        field.setMaximumSize(new Dimension(Integer.MAX_VALUE, 42));
-        field.setAlignmentX(Component.LEFT_ALIGNMENT);
     }
 
     private void signOut() {
@@ -376,12 +485,11 @@ public final class PharmacyAppFrame extends JFrame {
         logo.setForeground(WHITE);
         logo.setFont(new Font("Segoe UI", Font.BOLD, 14));
         logo.setPreferredSize(new Dimension(38, 38));
-        logo.setBorder(BorderFactory.createEmptyBorder(0, 0, 0, 0));
         JPanel brandText = new JPanel();
         brandText.setOpaque(false);
         brandText.setLayout(new BoxLayout(brandText, BoxLayout.Y_AXIS));
         JLabel appName = new JLabel("AIMMs Pharmacy");
-        appName.setFont(new Font("Segoe UI", Font.BOLD, 13));
+        appName.setFont(new Font("Segoe UI", Font.BOLD, 14));
         appName.setForeground(MAROON);
         JLabel workspaceLabel = new JLabel("COUNTER SYSTEM");
         workspaceLabel.setFont(new Font("Segoe UI", Font.BOLD, 9));
@@ -400,30 +508,30 @@ public final class PharmacyAppFrame extends JFrame {
         addSection(menu, currentUser != null && currentUser.role() == UserRole.PHARMACIST
                 ? "COUNTER WORKSPACE" : "MAIN OPERATIONS");
         if (currentUser != null && currentUser.role() == UserRole.PHARMACIST) {
-            addNav(menu, Screen.PHARMACIST_HOME, "Dashboard", "D");
-            addNav(menu, Screen.COUNTER_SALE, "Counter sale", "S");
-            addNav(menu, Screen.INVENTORY_ITEMS, "Inventory items", "I");
-            addNav(menu, Screen.STOCK_BATCHES, "Stock batches", "B");
-            addNav(menu, Screen.RESTOCK_REQUESTS, "Restock requests", "R");
-            addNav(menu, Screen.PRESCRIPTIONS, "Prescriptions", "Rx");
-            addNav(menu, Screen.TRANSACTIONS, "Transactions", "T");
+            addNav(menu, Screen.PHARMACIST_HOME, "Dashboard", NavGlyph.Kind.GRID);
+            addNav(menu, Screen.COUNTER_SALE, "Counter sale", NavGlyph.Kind.CART);
+            addNav(menu, Screen.INVENTORY_ITEMS, "Inventory items", NavGlyph.Kind.DIAMOND);
+            addNav(menu, Screen.STOCK_BATCHES, "Stock batches", NavGlyph.Kind.STACK);
+            addNav(menu, Screen.RESTOCK_REQUESTS, "Restock requests", NavGlyph.Kind.REFRESH);
+            addNav(menu, Screen.PRESCRIPTIONS, "Prescriptions", NavGlyph.Kind.RX);
+            addNav(menu, Screen.TRANSACTIONS, "Transactions", NavGlyph.Kind.SWAP);
             menu.add(Box.createVerticalStrut(16));
             addSection(menu, "ACCOUNTS & LOGS");
-            addNav(menu, Screen.CUSTOMERS, "Customers", "C");
-            addNav(menu, Screen.AUDIT_LOGS, "Audit & inventory logs", "L");
+            addNav(menu, Screen.CUSTOMERS, "Customers", NavGlyph.Kind.RING);
+            addNav(menu, Screen.AUDIT_LOGS, "Audit & inventory logs", NavGlyph.Kind.LIST);
         } else {
-            addNav(menu, Screen.DASHBOARD, "Dashboard", "D");
-            addNav(menu, Screen.INVENTORY_ITEMS, "Inventory items", "I");
-            addNav(menu, Screen.STOCK_BATCHES, "Stock batches", "B");
-            addNav(menu, Screen.RESTOCK_REQUESTS, "Restock requests", "R");
-            addNav(menu, Screen.PRESCRIPTIONS, "Prescriptions", "Rx");
-            addNav(menu, Screen.TRANSACTIONS, "Transactions", "T");
+            addNav(menu, Screen.DASHBOARD, "Dashboard", NavGlyph.Kind.GRID);
+            addNav(menu, Screen.INVENTORY_ITEMS, "Inventory items", NavGlyph.Kind.DIAMOND);
+            addNav(menu, Screen.STOCK_BATCHES, "Stock batches", NavGlyph.Kind.STACK);
+            addNav(menu, Screen.RESTOCK_REQUESTS, "Restock requests", NavGlyph.Kind.REFRESH);
+            addNav(menu, Screen.PRESCRIPTIONS, "Prescriptions", NavGlyph.Kind.RX);
+            addNav(menu, Screen.TRANSACTIONS, "Transactions", NavGlyph.Kind.SWAP);
             menu.add(Box.createVerticalStrut(16));
             addSection(menu, "ACCOUNTS & LOGS");
-            addNav(menu, Screen.CUSTOMERS, "Customers", "C");
-            addNav(menu, Screen.PHARMACISTS, "Pharmacist accounts", "P");
-            addNav(menu, Screen.ADMINS, "Admin accounts", "A");
-            addNav(menu, Screen.AUDIT_LOGS, "Audit & inventory logs", "L");
+            addNav(menu, Screen.CUSTOMERS, "Customers", NavGlyph.Kind.RING);
+            addNav(menu, Screen.PHARMACISTS, "Pharmacist accounts", NavGlyph.Kind.STAR);
+            addNav(menu, Screen.ADMINS, "Admin accounts", NavGlyph.Kind.SHIELD);
+            addNav(menu, Screen.AUDIT_LOGS, "Audit & inventory logs", NavGlyph.Kind.LIST);
         }
 
         JScrollPane menuScroll = new JScrollPane(menu);
@@ -436,11 +544,11 @@ public final class PharmacyAppFrame extends JFrame {
         JPanel profile = new JPanel(new BorderLayout(10, 0));
         profile.setBackground(SOFT);
         profile.setBorder(BorderFactory.createEmptyBorder(12, 12, 12, 12));
-        JLabel avatar = new JLabel("AD", SwingConstants.CENTER);
+        JLabel avatar = new JLabel(initials(currentUser == null ? "Staff" : currentUser.fullName()), SwingConstants.CENTER);
         avatar.setOpaque(true);
         avatar.setBackground(new Color(0xF0, 0xDE, 0xDD));
         avatar.setForeground(MAROON);
-        avatar.setFont(new Font("Segoe UI", Font.BOLD, 10));
+        avatar.setFont(FONT_MICRO);
         avatar.setPreferredSize(new Dimension(32, 32));
         JPanel profileLabels = new JPanel();
         profileLabels.setOpaque(false);
@@ -448,10 +556,10 @@ public final class PharmacyAppFrame extends JFrame {
         String accountName = currentUser == null ? "Staff" : currentUser.fullName();
         String roleName = currentUser == null ? "Pharmacy staff" : roleLabel(currentUser.role());
         JLabel preview = new JLabel(accountName);
-        preview.setFont(new Font("Segoe UI", Font.BOLD, 12));
+        preview.setFont(FONT_SUB);
         preview.setForeground(TEXT);
         JLabel csvData = new JLabel(roleName);
-        csvData.setFont(new Font("Segoe UI", Font.PLAIN, 10));
+        csvData.setFont(FONT_MICRO);
         csvData.setForeground(MUTED);
         profileLabels.add(preview);
         profileLabels.add(Box.createVerticalStrut(2));
@@ -459,11 +567,11 @@ public final class PharmacyAppFrame extends JFrame {
         profile.add(avatar, BorderLayout.WEST);
         profile.add(profileLabels, BorderLayout.CENTER);
         JButton signOut = new JButton("Sign out");
-        signOut.setFont(new Font("Segoe UI", Font.BOLD, 9));
+        signOut.setFont(FONT_MICRO);
         signOut.setForeground(MAROON);
         signOut.setBackground(WHITE);
         signOut.setBorder(BorderFactory.createEmptyBorder(6, 4, 6, 2));
-        signOut.setFocusPainted(true);
+        signOut.setFocusPainted(false);
         signOut.setCursor(java.awt.Cursor.getPredefinedCursor(java.awt.Cursor.HAND_CURSOR));
         signOut.addActionListener(event -> signOut());
         profile.add(signOut, BorderLayout.EAST);
@@ -484,8 +592,8 @@ public final class PharmacyAppFrame extends JFrame {
         menu.add(section);
     }
 
-    private void addNav(JPanel menu, Screen screen, String label, String glyph) {
-        NavButton button = new NavButton(label, glyph);
+    private void addNav(JPanel menu, Screen screen, String label, NavGlyph.Kind iconKind) {
+        NavButton button = new NavButton(label, iconKind);
         button.setAlignmentX(Component.LEFT_ALIGNMENT);
         button.setMaximumSize(new Dimension(Integer.MAX_VALUE, 36));
         button.setPreferredSize(new Dimension(212, 36));
@@ -547,7 +655,7 @@ public final class PharmacyAppFrame extends JFrame {
         JPanel right = new JPanel(new FlowLayout(FlowLayout.RIGHT, 10, 0));
         right.setOpaque(false);
         JLabel role = new JLabel(currentUser == null ? "Pharmacy staff" : roleLabel(currentUser.role()));
-        role.setFont(new Font("Segoe UI", Font.BOLD, 11));
+        role.setFont(FONT_MICRO);
         role.setForeground(TEXT);
         role.setOpaque(true);
         role.setBackground(CANVAS);
@@ -556,7 +664,7 @@ public final class PharmacyAppFrame extends JFrame {
         avatar.setOpaque(true);
         avatar.setBackground(new Color(0xF0, 0xDE, 0xDD));
         avatar.setForeground(MAROON);
-        avatar.setFont(new Font("Segoe UI", Font.BOLD, 10));
+        avatar.setFont(FONT_MICRO);
         avatar.setPreferredSize(new Dimension(32, 32));
         right.add(role);
         right.add(avatar);
@@ -612,7 +720,7 @@ public final class PharmacyAppFrame extends JFrame {
         }
         JPanel page = new JPanel(new GridBagLayout());
         page.setOpaque(false);
-        page.setBorder(BorderFactory.createEmptyBorder(24, 28, 30, 28));
+        page.setBorder(BorderFactory.createEmptyBorder(26, 32, 32, 32));
         GridBagConstraints pageConstraints = new GridBagConstraints();
         pageConstraints.gridx = 0;
         pageConstraints.gridy = 0;
@@ -623,6 +731,7 @@ public final class PharmacyAppFrame extends JFrame {
         page.add(buildPageHeading(screen), pageConstraints);
         if (!data.metrics().isEmpty()) {
             pageConstraints.gridy++;
+            pageConstraints.insets = new Insets(0, 0, 20, 0);
             page.add(buildMetricRow(data.metrics()), pageConstraints);
         }
         pageConstraints.gridy++;
@@ -637,68 +746,226 @@ public final class PharmacyAppFrame extends JFrame {
     private JPanel buildPageHeading(Screen screen) {
         JPanel heading = new JPanel(new BorderLayout(16, 0));
         heading.setOpaque(false);
+
         JPanel labels = new JPanel();
         labels.setOpaque(false);
         labels.setLayout(new BoxLayout(labels, BoxLayout.Y_AXIS));
+
         JLabel title = new JLabel(screenTitle(screen));
-        title.setFont(new Font("Segoe UI", Font.BOLD, 25));
+        title.setFont(FONT_PAGE_TITLE);
         title.setForeground(TEXT);
+
         JLabel subtitle = new JLabel(screenSubtitle(screen));
-        subtitle.setFont(UI_FONT);
+        subtitle.setFont(FONT_BODY);
         subtitle.setForeground(MUTED);
-        subtitle.setBorder(BorderFactory.createEmptyBorder(6, 0, 0, 0));
+        subtitle.setBorder(BorderFactory.createEmptyBorder(4, 0, 0, 0));
+
         labels.add(title);
         labels.add(subtitle);
         heading.add(labels, BorderLayout.CENTER);
 
+        JPanel actions = new JPanel(new FlowLayout(FlowLayout.RIGHT, 8, 0));
+        actions.setOpaque(false);
+
         if (screen == Screen.INVENTORY_ITEMS) {
-            JButton add = primaryButton("＋ Add medicine");
+            JButton add = primaryButton("+ Add medicine");
             add.addActionListener(event -> openAddMedicineDialog());
-            heading.add(add, BorderLayout.EAST);
+            actions.add(add);
         } else if (screen == Screen.PHARMACISTS) {
             JButton review = secondaryButton("Review selected");
             review.addActionListener(event -> openSelectedPharmacist());
-            heading.add(review, BorderLayout.EAST);
+            actions.add(review);
+        } else if (screen == Screen.ADMINS || screen == Screen.AUDIT_LOGS) {
+            JButton inspect = secondaryButton("Inspect selected");
+            inspect.addActionListener(event -> openSelectedRowDetails(screen));
+            actions.add(inspect);
         } else if (screen == Screen.PHARMACIST_HOME) {
-            JButton sale = primaryButton("＋ New sale");
+            JButton sale = primaryButton("+ New sale");
             sale.addActionListener(event -> openScreen(Screen.COUNTER_SALE));
-            heading.add(sale, BorderLayout.EAST);
+            actions.add(sale);
         } else if (screen == Screen.RESTOCK_REQUESTS && currentUser != null
                 && currentUser.role() == UserRole.ADMIN) {
             JButton approve = primaryButton("Approve / receive selected");
             approve.addActionListener(event -> approveSelectedRestockRequest());
-            heading.add(approve, BorderLayout.EAST);
+            actions.add(approve);
         } else if (screen == Screen.RESTOCK_REQUESTS && currentUser != null
                 && currentUser.role() == UserRole.PHARMACIST) {
-            JButton request = primaryButton("＋ New request");
-                        request.addActionListener(event -> openRestockRequestPreview());
-            heading.add(request, BorderLayout.EAST);
+            JButton request = primaryButton("+ New request");
+            request.addActionListener(event -> openRestockRequestPreview());
+            actions.add(request);
         } else if (screen == Screen.PRESCRIPTIONS) {
-            JPanel rxActions = new JPanel(new FlowLayout(FlowLayout.RIGHT, 8, 0));
-            rxActions.setOpaque(false);
             JButton verifyRx = secondaryButton("Verify / update selected");
             verifyRx.addActionListener(event -> openSelectedPrescriptionReview());
-            JButton registerRx = primaryButton("＋ Register paper prescription");
+            JButton registerRx = primaryButton("+ Register paper prescription");
             registerRx.addActionListener(event -> openRegisterPrescriptionDialog());
-            rxActions.add(verifyRx);
-            rxActions.add(registerRx);
-            heading.add(rxActions, BorderLayout.EAST);
+            actions.add(verifyRx);
+            actions.add(registerRx);
         } else if (screen == Screen.TRANSACTIONS) {
             JButton voidTxn = secondaryButton("Void selected sale");
             voidTxn.addActionListener(event -> voidSelectedTransaction());
-            heading.add(voidTxn, BorderLayout.EAST);
+            actions.add(voidTxn);
         } else if (screen == Screen.CUSTOMERS) {
-            JPanel customerActions = new JPanel(new FlowLayout(FlowLayout.RIGHT, 8, 0));
-            customerActions.setOpaque(false);
+            JButton inspect = secondaryButton("Inspect selected");
+            inspect.addActionListener(event -> openSelectedRowDetails(Screen.CUSTOMERS));
             JButton topUp = secondaryButton("Top-up selected");
             topUp.addActionListener(event -> openTopUpDialog());
-            JButton register = primaryButton("＋ Register customer");
+            JButton register = primaryButton("+ Register customer");
             register.addActionListener(event -> openRegisterCustomerDialog());
-            customerActions.add(topUp);
-            customerActions.add(register);
-            heading.add(customerActions, BorderLayout.EAST);
+            actions.add(inspect);
+            actions.add(topUp);
+            actions.add(register);
+        }
+
+        if (actions.getComponentCount() > 0) {
+            heading.add(actions, BorderLayout.EAST);
         }
         return heading;
+    }
+
+    private JPanel buildMetricRow(List<Metric> metrics) {
+        int columns = metrics.size() >= 4 ? 4 : Math.max(1, metrics.size());
+        int rows = (int) Math.ceil((double) metrics.size() / columns);
+
+        JPanel row = new JPanel(new GridLayout(rows, columns, 16, 14));
+        row.setOpaque(false);
+
+        for (Metric metric : metrics) {
+            Screen target = metricTargetScreen(metric.label());
+            boolean actionable = target != null && target != currentScreen && hasPositiveCount(metric.value());
+
+            RoundedCard card = new RoundedCard(16, WHITE,
+                    actionable ? new Color(0xE6, 0xC8, 0x9C) : BORDER, actionable);
+            card.setLayout(new BoxLayout(card, BoxLayout.Y_AXIS));
+            card.setBorder(BorderFactory.createEmptyBorder(14, 18, 14, 18));
+
+            JPanel header = new JPanel(new BorderLayout(8, 0));
+            header.setOpaque(false);
+            header.setAlignmentX(Component.LEFT_ALIGNMENT);
+
+            JLabel label = new JLabel(metric.label().toUpperCase(Locale.ROOT));
+            label.setFont(FONT_MICRO);
+            label.setForeground(actionable ? AMBER : MUTED);
+            header.add(label, BorderLayout.CENTER);
+
+            if (actionable) {
+                PillLabel badge = new PillLabel("Review →", AMBER_SOFT, AMBER);
+                header.add(badge, BorderLayout.EAST);
+            }
+
+            JPanel body = new JPanel(new FlowLayout(FlowLayout.LEFT, 10, 0));
+            body.setOpaque(false);
+            body.setAlignmentX(Component.LEFT_ALIGNMENT);
+
+            Color chipBg = actionable ? AMBER_SOFT : SOFT;
+            Color chipFg = actionable ? AMBER : TEXT;
+            PillLabel valueChip = new PillLabel(metric.value(), chipBg, chipFg);
+            valueChip.setFont(FONT_METRIC_VALUE);
+            valueChip.setBorder(BorderFactory.createEmptyBorder(4, 12, 4, 12));
+
+            JLabel note = new JLabel(metric.note());
+            note.setFont(FONT_SUB);
+            note.setForeground(MUTED);
+
+            body.add(valueChip);
+            body.add(note);
+
+            card.add(header);
+            card.add(Box.createVerticalStrut(10));
+            card.add(body);
+
+            if (actionable) {
+                card.setCursor(java.awt.Cursor.getPredefinedCursor(java.awt.Cursor.HAND_CURSOR));
+                card.addMouseListener(new java.awt.event.MouseAdapter() {
+                    @Override
+                    public void mouseClicked(java.awt.event.MouseEvent e) {
+                        openScreen(target);
+                    }
+
+                    @Override
+                    public void mouseEntered(java.awt.event.MouseEvent e) {
+                        card.setHover(true);
+                    }
+
+                    @Override
+                    public void mouseExited(java.awt.event.MouseEvent e) {
+                        card.setHover(false);
+                    }
+                });
+            }
+
+            row.add(card);
+        }
+        return row;
+    }
+
+    private JPanel buildTableCard(Screen screen, ScreenData data) {
+        RoundedCard card = new RoundedCard(20, WHITE, BORDER, false);
+        card.setLayout(new BorderLayout(0, 14));
+        card.setBorder(BorderFactory.createEmptyBorder(20, 24, 22, 24));
+        card.setMinimumSize(new Dimension(0, 340));
+
+        JPanel heading = new JPanel(new BorderLayout(14, 0));
+        heading.setOpaque(false);
+
+        JPanel copy = new JPanel();
+        copy.setOpaque(false);
+        copy.setLayout(new BoxLayout(copy, BoxLayout.Y_AXIS));
+
+        JLabel title = new JLabel(tableTitle(screen));
+        title.setFont(FONT_SECTION_TITLE);
+        title.setForeground(TEXT);
+
+        JLabel subtitle = new JLabel(tableSubtitle(screen, data));
+        subtitle.setFont(FONT_SUB);
+        subtitle.setForeground(MUTED);
+        subtitle.setBorder(BorderFactory.createEmptyBorder(4, 0, 0, 0));
+
+        copy.add(title);
+        copy.add(subtitle);
+        heading.add(copy, BorderLayout.WEST);
+
+        String countText = data.rows().size() + (data.rows().size() == 1 ? " record" : " records");
+        PillLabel countPill = new PillLabel(countText, CANVAS, TEXT);
+        countPill.setFont(FONT_SUB);
+        countPill.setBorder(BorderFactory.createEmptyBorder(5, 13, 5, 13));
+        heading.add(countPill, BorderLayout.EAST);
+
+        card.add(heading, BorderLayout.NORTH);
+
+        if (data.rows().isEmpty()) {
+            card.add(buildEmptyState(data.emptyTitle(), data.emptyMessage()), BorderLayout.CENTER);
+        } else {
+            JTable table = buildTable(data);
+            currentTable = table;
+            JScrollPane tableScroll = new JScrollPane(table);
+            tableScroll.setBorder(BorderFactory.createLineBorder(BORDER));
+            tableScroll.getViewport().setBackground(WHITE);
+            tableScroll.getVerticalScrollBar().setUnitIncrement(16);
+            tableScroll.setPreferredSize(new Dimension(0, 440));
+            card.add(tableScroll, BorderLayout.CENTER);
+        }
+        return card;
+    }
+
+    private Screen metricTargetScreen(String metricLabel) {
+        if (metricLabel == null) return null;
+        String upper = metricLabel.toUpperCase(Locale.ROOT);
+        if (upper.contains("PHARMACIST")) return Screen.PHARMACISTS;
+        if (upper.contains("RESTOCK")) return Screen.RESTOCK_REQUESTS;
+        if (upper.contains("BATCH") || upper.contains("EXPIR")) return Screen.STOCK_BATCHES;
+        if (upper.contains("MEDICINE") || upper.contains("CATALOG")) return Screen.INVENTORY_ITEMS;
+        return null;
+    }
+
+    private boolean hasPositiveCount(String rawValue) {
+        if (rawValue == null) return false;
+        String digitsOnly = rawValue.replaceAll("[^0-9]", "");
+        if (digitsOnly.isEmpty()) return false;
+        try {
+            return Integer.parseInt(digitsOnly) > 0;
+        } catch (NumberFormatException ex) {
+            return false;
+        }
     }
 
     private JPanel buildCounterSalePage(ScreenData data) {
@@ -727,10 +994,10 @@ public final class PharmacyAppFrame extends JFrame {
         catalogHeader.setOpaque(false);
         catalogHeader.setLayout(new BoxLayout(catalogHeader, BoxLayout.Y_AXIS));
         JLabel catalogTitle = new JLabel("Find medicine");
-        catalogTitle.setFont(new Font("Segoe UI", Font.BOLD, 15));
+        catalogTitle.setFont(FONT_SECTION_TITLE);
         catalogTitle.setForeground(TEXT);
         JLabel catalogNote = new JLabel("Select an item to add it to this sale.");
-        catalogNote.setFont(new Font("Segoe UI", Font.PLAIN, 11));
+        catalogNote.setFont(FONT_SUB);
         catalogNote.setForeground(MUTED);
         catalogNote.setBorder(BorderFactory.createEmptyBorder(4, 0, 0, 0));
         catalogHeader.add(catalogTitle);
@@ -749,7 +1016,7 @@ public final class PharmacyAppFrame extends JFrame {
         JPanel catalogFooter = new JPanel(new BorderLayout());
         catalogFooter.setOpaque(false);
         JLabel fefoNote = new JLabel("Eligible batches are allocated by earliest expiry.");
-        fefoNote.setFont(new Font("Segoe UI", Font.PLAIN, 10));
+        fefoNote.setFont(FONT_SUB);
         fefoNote.setForeground(MUTED);
         catalogFooter.add(fefoNote, BorderLayout.NORTH);
         JPanel addWrap = new JPanel(new FlowLayout(FlowLayout.RIGHT, 0, 10));
@@ -767,10 +1034,10 @@ public final class PharmacyAppFrame extends JFrame {
         cartTitleStack.setOpaque(false);
         cartTitleStack.setLayout(new BoxLayout(cartTitleStack, BoxLayout.Y_AXIS));
         JLabel saleTitle = new JLabel("Current sale");
-        saleTitle.setFont(new Font("Segoe UI", Font.BOLD, 15));
+        saleTitle.setFont(FONT_SECTION_TITLE);
         saleTitle.setForeground(TEXT);
         cartCountLabel = new JLabel("0 items");
-        cartCountLabel.setFont(new Font("Segoe UI", Font.PLAIN, 11));
+        cartCountLabel.setFont(FONT_SUB);
         cartCountLabel.setForeground(MUTED);
         cartTitleStack.add(saleTitle);
         cartTitleStack.add(Box.createVerticalStrut(4));
@@ -785,7 +1052,7 @@ public final class PharmacyAppFrame extends JFrame {
         JPanel customerField = new JPanel(new BorderLayout(0, 5));
         customerField.setOpaque(false);
         JLabel customerLabel = new JLabel("Customer ID · optional");
-        customerLabel.setFont(new Font("Segoe UI", Font.BOLD, 10));
+        customerLabel.setFont(FONT_MICRO);
         customerLabel.setForeground(MUTED);
         customerField.add(customerLabel, BorderLayout.NORTH);
         customerField.add(saleCustomerField, BorderLayout.CENTER);
@@ -807,16 +1074,16 @@ public final class PharmacyAppFrame extends JFrame {
         JPanel totalRow = new JPanel(new BorderLayout());
         totalRow.setOpaque(false);
         JLabel totalCaption = new JLabel("Estimated total");
-        totalCaption.setFont(new Font("Segoe UI", Font.BOLD, 12));
+        totalCaption.setFont(FONT_BODY);
         totalCaption.setForeground(TEXT);
         cartTotalLabel = new JLabel("₱ 0.00");
-        cartTotalLabel.setFont(new Font("Segoe UI", Font.BOLD, 18));
-        cartTotalLabel.setForeground(TEXT);
+        cartTotalLabel.setFont(FONT_METRIC_VALUE);
+        cartTotalLabel.setForeground(MAROON);
         totalRow.add(totalCaption, BorderLayout.WEST);
         totalRow.add(cartTotalLabel, BorderLayout.EAST);
         cartFooter.add(totalRow);
         JLabel previewNotice = new JLabel("<html>Completion saves transaction, stock, and audit records<br>to this computer's runtime CSV files.</html>");
-        previewNotice.setFont(new Font("Segoe UI", Font.PLAIN, 10));
+        previewNotice.setFont(FONT_SUB);
         previewNotice.setForeground(MUTED);
         previewNotice.setBorder(BorderFactory.createEmptyBorder(7, 0, 10, 0));
         cartFooter.add(previewNotice);
@@ -890,7 +1157,7 @@ public final class PharmacyAppFrame extends JFrame {
             if (choice == null) return;
             if (choice.remaining() < 1) {
                 JOptionPane.showMessageDialog(this, "That prescription item has no remaining quantity.",
-                        "Current sale", JOptionPane.WARNING_MESSAGE);
+                        "Current sale", JOptionPane.INFORMATION_MESSAGE);
                 return;
             }
             prescriptionItemID = choice.prescriptionItemID();
@@ -899,7 +1166,7 @@ public final class PharmacyAppFrame extends JFrame {
         int quantity = existing == null ? 1 : existing.quantity() + 1;
         if (rxRemaining > 0 && quantity > rxRemaining) {
             JOptionPane.showMessageDialog(this, "The linked prescription allows only " + rxRemaining
-                    + " more unit(s).", "Current sale", JOptionPane.WARNING_MESSAGE);
+                    + " more unit(s).", "Current sale", JOptionPane.INFORMATION_MESSAGE);
             return;
         }
         cartItems.put(itemID, new CartLine(itemID, row.get(0), row.get(1), new BigDecimal(row.get(4).replaceAll("[^0-9.]", "")),
@@ -907,7 +1174,6 @@ public final class PharmacyAppFrame extends JFrame {
         renderCart();
     }
 
-    /** Asks which verified prescription item should cover a prescription medicine being sold. */
     private PharmacyScreenService.EligibleRxItem choosePrescriptionItem(String itemID, String itemName, String customerID) {
         List<PharmacyScreenService.EligibleRxItem> options = controller.eligiblePrescriptionItems(customerID).stream()
                 .filter(rx -> rx.itemID().equals(itemID)).toList();
@@ -945,26 +1211,26 @@ public final class PharmacyAppFrame extends JFrame {
             row.setBorder(BorderFactory.createCompoundBorder(
                     BorderFactory.createLineBorder(BORDER), BorderFactory.createEmptyBorder(10, 11, 10, 10)));
             row.setAlignmentX(Component.LEFT_ALIGNMENT);
-            row.setMaximumSize(new Dimension(Integer.MAX_VALUE, linkedToPrescription ? 94 : 78));
+            row.setMaximumSize(new Dimension(Integer.MAX_VALUE, linkedToPrescription ? 96 : 80));
             JPanel detail = new JPanel();
             detail.setOpaque(false);
             detail.setLayout(new BoxLayout(detail, BoxLayout.Y_AXIS));
             JLabel name = new JLabel(line.name());
-            name.setFont(new Font("Segoe UI", Font.BOLD, 11));
+            name.setFont(new Font("Segoe UI", Font.BOLD, 12));
             name.setForeground(TEXT);
             JLabel price = new JLabel("₱ " + line.unitPrice().setScale(2).toPlainString()
                     + " each · " + line.type());
-            price.setFont(new Font("Segoe UI", Font.PLAIN, 10));
+            price.setFont(FONT_SUB);
             price.setForeground(MUTED);
             detail.add(name);
-            detail.add(Box.createVerticalStrut(4));
+            detail.add(Box.createVerticalStrut(3));
             detail.add(price);
             if (linkedToPrescription) {
                 JLabel rx = new JLabel("Linked to " + line.prescriptionItemID() + " · up to "
                         + line.rxRemaining() + " unit(s) on the prescription");
-                rx.setFont(new Font("Segoe UI", Font.PLAIN, 10));
-                rx.setForeground(MUTED);
-                detail.add(Box.createVerticalStrut(2));
+                rx.setFont(FONT_MICRO);
+                rx.setForeground(AMBER);
+                detail.add(Box.createVerticalStrut(3));
                 detail.add(rx);
             }
             row.add(detail, BorderLayout.CENTER);
@@ -975,7 +1241,7 @@ public final class PharmacyAppFrame extends JFrame {
             minus.getAccessibleContext().setAccessibleName("Decrease " + line.name() + " quantity");
             minus.addActionListener(event -> changeCartQuantity(line.itemID(), -1));
             JLabel quantity = new JLabel(Integer.toString(line.quantity()), SwingConstants.CENTER);
-            quantity.setFont(new Font("Segoe UI", Font.BOLD, 11));
+            quantity.setFont(FONT_MICRO);
             quantity.setForeground(TEXT);
             quantity.setPreferredSize(new Dimension(24, 28));
             JButton plus = smallButton("+");
@@ -996,7 +1262,7 @@ public final class PharmacyAppFrame extends JFrame {
         }
         if (cartItems.isEmpty()) {
             JLabel empty = new JLabel("Your sale is empty. Add an item from the catalog.");
-            empty.setFont(new Font("Segoe UI", Font.PLAIN, 11));
+            empty.setFont(FONT_SUB);
             empty.setForeground(MUTED);
             empty.setBorder(BorderFactory.createEmptyBorder(18, 2, 0, 2));
             cartLinesPanel.add(empty);
@@ -1042,7 +1308,7 @@ public final class PharmacyAppFrame extends JFrame {
         button.setForeground(MAROON);
         button.setBackground(WHITE);
         button.setBorder(BorderFactory.createLineBorder(BORDER));
-        button.setFocusPainted(true);
+        button.setFocusPainted(false);
         button.setPreferredSize(new Dimension(28, 28));
         return button;
     }
@@ -1089,7 +1355,7 @@ public final class PharmacyAppFrame extends JFrame {
         content.setBackground(WHITE);
         content.setBorder(BorderFactory.createEmptyBorder(22, 24, 18, 24));
         JLabel title = new JLabel("Request more stock");
-        title.setFont(new Font("Segoe UI", Font.BOLD, 17));
+        title.setFont(FONT_SECTION_TITLE);
         title.setForeground(TEXT);
         content.add(title, BorderLayout.NORTH);
         JPanel form = new JPanel(new GridBagLayout());
@@ -1105,7 +1371,7 @@ public final class PharmacyAppFrame extends JFrame {
         addFormRow(form, 2, "Reason", reason);
         content.add(form, BorderLayout.CENTER);
         JLabel note = new JLabel("The request will be saved to the runtime CSV file.");
-        note.setFont(new Font("Segoe UI", Font.PLAIN, 10));
+        note.setFont(FONT_SUB);
         note.setForeground(MUTED);
         JButton close = secondaryButton("Close");
         JButton save = primaryButton("Save request");
@@ -1136,81 +1402,12 @@ public final class PharmacyAppFrame extends JFrame {
                 JOptionPane.showMessageDialog(dialog, actionErrorMessage(ex), "Check request details", JOptionPane.WARNING_MESSAGE);
             }
         });
+        dialog.getRootPane().setDefaultButton(save);
         dialog.setContentPane(content);
         dialog.pack();
         dialog.setMinimumSize(new Dimension(480, dialog.getHeight()));
         dialog.setLocationRelativeTo(this);
         dialog.setVisible(true);
-    }
-    private JPanel buildMetricRow(List<Metric> metrics) {
-        int columns = metrics.size() >= 4 ? 4 : Math.max(1, metrics.size());
-        int rows = (int) Math.ceil((double) metrics.size() / columns);
-        int rowHeight = rows * 102 + Math.max(0, rows - 1) * 14;
-        JPanel row = new JPanel(new GridLayout(rows, columns, 14, 14));
-        row.setOpaque(false);
-        row.setPreferredSize(new Dimension(0, rowHeight));
-        row.setMinimumSize(new Dimension(0, rowHeight));
-        row.setMaximumSize(new Dimension(Integer.MAX_VALUE, rowHeight));
-        for (Metric metric : metrics) {
-            JPanel card = cardPanel(new BorderLayout(0, 6));
-            card.setBorder(BorderFactory.createEmptyBorder(15, 17, 13, 17));
-            JLabel label = new JLabel(metric.label());
-            label.setFont(new Font("Segoe UI", Font.BOLD, 10));
-            label.setForeground(MUTED);
-            JPanel center = new JPanel(new FlowLayout(FlowLayout.LEFT, 8, 0));
-            center.setOpaque(false);
-            JLabel value = new JLabel(metric.value());
-            value.setFont(new Font("Segoe UI", Font.BOLD, 25));
-            value.setForeground(TEXT);
-            JLabel note = new JLabel(metric.note());
-            note.setFont(new Font("Segoe UI", Font.PLAIN, 11));
-            note.setForeground(MUTED);
-            center.add(value);
-            center.add(note);
-            card.add(label, BorderLayout.NORTH);
-            card.add(center, BorderLayout.CENTER);
-            row.add(card);
-        }
-        return row;
-    }
-
-    private JPanel buildTableCard(Screen screen, ScreenData data) {
-        JPanel card = cardPanel(new BorderLayout(0, 12));
-        card.setBorder(BorderFactory.createEmptyBorder(18, 18, 14, 18));
-        int cardHeight = data.rows().isEmpty() ? 360 : 520;
-        card.setPreferredSize(new Dimension(0, cardHeight));
-        card.setMinimumSize(new Dimension(0, 310));
-        card.setMaximumSize(new Dimension(Integer.MAX_VALUE, Integer.MAX_VALUE));
-
-        JPanel heading = new JPanel(new BorderLayout());
-        heading.setOpaque(false);
-        JPanel copy = new JPanel();
-        copy.setOpaque(false);
-        copy.setLayout(new BoxLayout(copy, BoxLayout.Y_AXIS));
-        JLabel title = new JLabel(tableTitle(screen));
-        title.setFont(new Font("Segoe UI", Font.BOLD, 15));
-        title.setForeground(TEXT);
-        JLabel subtitle = new JLabel(tableSubtitle(screen, data));
-        subtitle.setFont(new Font("Segoe UI", Font.PLAIN, 11));
-        subtitle.setForeground(MUTED);
-        subtitle.setBorder(BorderFactory.createEmptyBorder(4, 0, 0, 0));
-        copy.add(title);
-        copy.add(subtitle);
-        heading.add(copy, BorderLayout.WEST);
-        card.add(heading, BorderLayout.NORTH);
-
-        if (data.rows().isEmpty()) {
-            card.add(buildEmptyState(data.emptyTitle(), data.emptyMessage()), BorderLayout.CENTER);
-        } else {
-            JTable table = buildTable(data);
-            currentTable = table;
-            JScrollPane tableScroll = new JScrollPane(table);
-            tableScroll.setBorder(BorderFactory.createEmptyBorder());
-            tableScroll.getViewport().setBackground(WHITE);
-            tableScroll.getVerticalScrollBar().setUnitIncrement(16);
-            card.add(tableScroll, BorderLayout.CENTER);
-        }
-        return card;
     }
 
     private JTable buildTable(ScreenData data) {
@@ -1225,7 +1422,7 @@ public final class PharmacyAppFrame extends JFrame {
             model.addRow(row.toArray());
         }
         JTable table = new JTable(model);
-        table.setFont(new Font("Segoe UI", Font.PLAIN, 12));
+        table.setFont(FONT_SUB);
         table.setForeground(TEXT);
         table.setBackground(WHITE);
         table.setSelectionBackground(new Color(0xF8, 0xEE, 0xEE));
@@ -1238,10 +1435,9 @@ public final class PharmacyAppFrame extends JFrame {
         table.getTableHeader().setReorderingAllowed(false);
         table.getTableHeader().setBackground(SOFT);
         table.getTableHeader().setForeground(MUTED);
-        table.getTableHeader().setFont(new Font("Segoe UI", Font.BOLD, 10));
+        table.getTableHeader().setFont(FONT_MICRO);
         table.getTableHeader().setPreferredSize(new Dimension(100, 38));
-        // POLYMORPHISM: JTable uses this renderer through its superclass API and calls the overridden
-        // cell-rendering method for each value.
+        table.getTableHeader().setBorder(BorderFactory.createMatteBorder(0, 0, 1, 0, BORDER));
         table.setDefaultRenderer(Object.class, new StatusCellRenderer());
         TableRowSorter<DefaultTableModel> sorter = new TableRowSorter<>(model);
         table.setRowSorter(sorter);
@@ -1265,7 +1461,7 @@ public final class PharmacyAppFrame extends JFrame {
         titleLabel.setForeground(TEXT);
         JLabel messageLabel = new JLabel(message, SwingConstants.CENTER);
         messageLabel.setAlignmentX(Component.CENTER_ALIGNMENT);
-        messageLabel.setFont(new Font("Segoe UI", Font.PLAIN, 12));
+        messageLabel.setFont(FONT_SUB);
         messageLabel.setForeground(MUTED);
         messageLabel.setBorder(BorderFactory.createEmptyBorder(6, 0, 0, 0));
         content.add(icon);
@@ -1280,36 +1476,38 @@ public final class PharmacyAppFrame extends JFrame {
         JPanel page = new JPanel();
         page.setOpaque(false);
         page.setLayout(new BoxLayout(page, BoxLayout.Y_AXIS));
-        page.setBorder(BorderFactory.createEmptyBorder(24, 28, 30, 28));
+        page.setBorder(BorderFactory.createEmptyBorder(26, 32, 32, 32));
         JLabel title = new JLabel(screenTitle(screen));
-        title.setFont(new Font("Segoe UI", Font.BOLD, 25));
+        title.setFont(FONT_PAGE_TITLE);
         title.setForeground(TEXT);
         JLabel subtitle = new JLabel("Loading pharmacy records...");
         subtitle.setFont(UI_FONT);
         subtitle.setForeground(MUTED);
         page.add(title);
-        page.add(Box.createVerticalStrut(7));
+        page.add(Box.createVerticalStrut(6));
         page.add(subtitle);
         page.add(Box.createVerticalStrut(20));
 
-        JPanel metrics = new JPanel(new GridLayout(2, 2, 14, 12));
+        JPanel metrics = new JPanel(new GridLayout(1, 4, 16, 14));
         metrics.setOpaque(false);
         metrics.setAlignmentX(Component.LEFT_ALIGNMENT);
-        metrics.setPreferredSize(new Dimension(0, 216));
-        metrics.setMinimumSize(new Dimension(0, 216));
-        metrics.setMaximumSize(new Dimension(Integer.MAX_VALUE, 216));
+        metrics.setPreferredSize(new Dimension(0, 96));
+        metrics.setMinimumSize(new Dimension(0, 96));
+        metrics.setMaximumSize(new Dimension(Integer.MAX_VALUE, 96));
         for (int i = 0; i < 4; i++) {
-            JPanel card = cardPanel(new BorderLayout(0, 10));
-            card.setBorder(BorderFactory.createEmptyBorder(16, 16, 16, 16));
-            card.add(skeletonBlock(118, 9), BorderLayout.NORTH);
-            card.add(skeletonBlock(72, 24), BorderLayout.CENTER);
+            RoundedCard card = new RoundedCard(16, WHITE, BORDER, false);
+            card.setLayout(new BorderLayout(0, 10));
+            card.setBorder(BorderFactory.createEmptyBorder(14, 18, 14, 18));
+            card.add(skeletonBlock(110, 9), BorderLayout.NORTH);
+            card.add(skeletonBlock(68, 22), BorderLayout.CENTER);
             metrics.add(card);
         }
         page.add(metrics);
-        page.add(Box.createVerticalStrut(18));
+        page.add(Box.createVerticalStrut(20));
 
-        JPanel tableCard = cardPanel(new BorderLayout(0, 15));
-        tableCard.setBorder(BorderFactory.createEmptyBorder(18, 18, 18, 18));
+        RoundedCard tableCard = new RoundedCard(20, WHITE, BORDER, false);
+        tableCard.setLayout(new BorderLayout(0, 15));
+        tableCard.setBorder(BorderFactory.createEmptyBorder(20, 22, 20, 22));
         JPanel heading = new JPanel();
         heading.setOpaque(false);
         heading.setLayout(new BoxLayout(heading, BoxLayout.Y_AXIS));
@@ -1335,97 +1533,23 @@ public final class PharmacyAppFrame extends JFrame {
         return page;
     }
 
-    private JPanel buildStartupPanel(String error) {
-        JPanel background = new JPanel(new GridBagLayout());
-        background.setBackground(CANVAS);
-        JPanel card = cardPanel(new BorderLayout(0, 18));
-        card.setPreferredSize(new Dimension(520, 370));
-        card.setBorder(BorderFactory.createEmptyBorder(34, 42, 34, 42));
-
-        JPanel brand = new JPanel(new FlowLayout(FlowLayout.CENTER, 13, 0));
-        brand.setOpaque(false);
-        JLabel logo = new JLabel("Rx", SwingConstants.CENTER);
-        logo.setOpaque(true);
-        logo.setBackground(MAROON);
-        logo.setForeground(WHITE);
-        logo.setFont(new Font("Segoe UI", Font.BOLD, 17));
-        logo.setPreferredSize(new Dimension(46, 46));
-        JPanel nameStack = new JPanel();
-        nameStack.setOpaque(false);
-        nameStack.setLayout(new BoxLayout(nameStack, BoxLayout.Y_AXIS));
-        JLabel name = new JLabel("AIMMs Pharmacy");
-        name.setFont(new Font("Segoe UI", Font.BOLD, 20));
-        name.setForeground(TEXT);
-        JLabel sub = new JLabel("Preparing your workspace");
-        sub.setFont(UI_FONT);
-        sub.setForeground(MUTED);
-        nameStack.add(name);
-        nameStack.add(Box.createVerticalStrut(3));
-        nameStack.add(sub);
-        brand.add(logo);
-        brand.add(nameStack);
-        card.add(brand, BorderLayout.NORTH);
-
-        JPanel status = new JPanel();
-        status.setOpaque(false);
-        status.setLayout(new BoxLayout(status, BoxLayout.Y_AXIS));
-        JLabel loading = new JLabel(error == null ? "Loading pharmacy data..." : "Pharmacy data could not be loaded");
-        loading.setFont(new Font("Segoe UI", Font.BOLD, 14));
-        loading.setForeground(TEXT);
-        loading.setAlignmentX(Component.CENTER_ALIGNMENT);
-        status.add(loading);
-        status.add(Box.createVerticalStrut(14));
-        if (error == null) {
-            JProgressBar progress = new JProgressBar();
-            progress.setIndeterminate(true);
-            progress.setForeground(MAROON);
-            progress.setBackground(new Color(0xE9, 0xE5, 0xE3));
-            progress.setBorderPainted(false);
-            progress.setMaximumSize(new Dimension(390, 8));
-            status.add(progress);
-            status.add(Box.createVerticalStrut(9));
-            JLabel message = new JLabel("Reading the records needed for your dashboard");
-            message.setFont(new Font("Segoe UI", Font.PLAIN, 11));
-            message.setForeground(MUTED);
-            message.setAlignmentX(Component.CENTER_ALIGNMENT);
-            status.add(message);
-        } else {
-            JLabel message = new JLabel("Check the CSV file format, then retry.");
-            message.setFont(new Font("Segoe UI", Font.PLAIN, 12));
-            message.setForeground(MUTED);
-            message.setAlignmentX(Component.CENTER_ALIGNMENT);
-            status.add(message);
-            status.add(Box.createVerticalStrut(12));
-            JButton retry = primaryButton("Retry");
-            retry.setAlignmentX(Component.CENTER_ALIGNMENT);
-            retry.addActionListener(event -> loadInitialData());
-            status.add(retry);
-        }
-        card.add(status, BorderLayout.CENTER);
-        JLabel privacy = new JLabel("Your pharmacy records stay in the configured CSV workspace.", SwingConstants.CENTER);
-        privacy.setFont(new Font("Segoe UI", Font.PLAIN, 10));
-        privacy.setForeground(MUTED);
-        card.add(privacy, BorderLayout.SOUTH);
-        background.add(card);
-        return background;
-    }
-
     private void renderError(Screen screen, String message) {
         JPanel page = new JPanel(new BorderLayout());
         page.setOpaque(false);
-        page.setBorder(BorderFactory.createEmptyBorder(24, 28, 30, 28));
+        page.setBorder(BorderFactory.createEmptyBorder(26, 32, 32, 32));
         JPanel stack = new JPanel();
         stack.setOpaque(false);
         stack.setLayout(new BoxLayout(stack, BoxLayout.Y_AXIS));
         JLabel title = new JLabel(screenTitle(screen));
-        title.setFont(new Font("Segoe UI", Font.BOLD, 25));
+        title.setFont(FONT_PAGE_TITLE);
         title.setForeground(TEXT);
         stack.add(title);
         stack.add(Box.createVerticalStrut(18));
-        JPanel errorCard = cardPanel(new BorderLayout(12, 12));
+        RoundedCard errorCard = new RoundedCard(18, WHITE, BORDER, false);
+        errorCard.setLayout(new BorderLayout(12, 12));
         errorCard.setBorder(BorderFactory.createEmptyBorder(22, 24, 22, 24));
         JLabel errorTitle = new JLabel("We couldn't load these records");
-        errorTitle.setFont(new Font("Segoe UI", Font.BOLD, 15));
+        errorTitle.setFont(FONT_SECTION_TITLE);
         errorTitle.setForeground(TEXT);
         JLabel detail = new JLabel("<html>" + escapeHtml(message)
                 + "<br>Check the CSV header and rows, then try again.</html>");
@@ -1454,7 +1578,7 @@ public final class PharmacyAppFrame extends JFrame {
             return;
         }
         String value = searchField.getText().trim();
-        if (value.isEmpty() || value.equals("Search rows on the current screen...")) { 
+        if (value.isEmpty() || value.equals("Search rows on the current screen...")) {
             currentSorter.setRowFilter(null);
         } else {
             currentSorter.setRowFilter(RowFilter.regexFilter("(?i)" + Pattern.quote(value)));
@@ -1468,7 +1592,7 @@ public final class PharmacyAppFrame extends JFrame {
         content.setBackground(WHITE);
         content.setBorder(BorderFactory.createEmptyBorder(24, 26, 20, 26));
         JLabel title = new JLabel("Add medicine");
-        title.setFont(new Font("Segoe UI", Font.BOLD, 19));
+        title.setFont(FONT_SECTION_TITLE);
         title.setForeground(TEXT);
         JLabel subtitle = new JLabel("Add the product details to the catalog.");
         subtitle.setFont(UI_FONT);
@@ -1504,7 +1628,7 @@ public final class PharmacyAppFrame extends JFrame {
         content.add(form, BorderLayout.CENTER);
 
         JLabel error = new JLabel(" ");
-        error.setFont(new Font("Segoe UI", Font.PLAIN, 11));
+        error.setFont(FONT_SUB);
         error.setForeground(new Color(0xA7, 0x38, 0x35));
         JButton cancel = secondaryButton("Cancel");
         JButton save = primaryButton("Save medicine");
@@ -1532,6 +1656,7 @@ public final class PharmacyAppFrame extends JFrame {
         actions.add(save);
         footer.add(actions, BorderLayout.SOUTH);
         content.add(footer, BorderLayout.SOUTH);
+        dialog.getRootPane().setDefaultButton(save);
         dialog.setContentPane(content);
         dialog.pack();
         dialog.setMinimumSize(new Dimension(480, dialog.getHeight()));
@@ -1546,7 +1671,7 @@ public final class PharmacyAppFrame extends JFrame {
         label.anchor = GridBagConstraints.WEST;
         label.insets = new Insets(6, 0, 6, 16);
         JLabel caption = new JLabel(labelText);
-        caption.setFont(new Font("Segoe UI", Font.BOLD, 11));
+        caption.setFont(FONT_MICRO);
         caption.setForeground(TEXT);
         form.add(caption, label);
 
@@ -1621,6 +1746,37 @@ public final class PharmacyAppFrame extends JFrame {
             JOptionPane.showMessageDialog(this, details,
                     "Review pharmacist account", JOptionPane.INFORMATION_MESSAGE);
         }
+    }
+
+    private void openSelectedRowDetails(Screen screen) {
+        if (currentTable == null || currentTable.getSelectedRow() < 0 || currentData == null) {
+            JOptionPane.showMessageDialog(this, "Select a row to inspect.",
+                    screenTitle(screen), JOptionPane.INFORMATION_MESSAGE);
+            return;
+        }
+        int modelRow = currentTable.convertRowIndexToModel(currentTable.getSelectedRow());
+        List<String> row = currentData.rows().get(modelRow);
+        List<String> cols = currentData.columns();
+
+        StringBuilder body = new StringBuilder("<html><body style='font-family:Segoe UI,sans-serif;width:380px;'>");
+        body.append("<div style='font-size:16px;font-weight:bold;color:#292322;margin-bottom:4px;'>")
+                .append(escapeHtml(screenTitle(screen))).append("</div>");
+        body.append("<div style='font-size:11px;color:#827976;margin-bottom:12px;'>Selected record details</div>");
+        body.append("<table cellpadding='6' cellspacing='0' style='width:100%;border-collapse:collapse;'>");
+        for (int i = 0; i < row.size(); i++) {
+            String colName = i < cols.size() ? cols.get(i) : ("Field " + (i + 1));
+            String val = row.get(i) == null || row.get(i).isBlank() ? "—" : row.get(i);
+            body.append("<tr style='border-bottom:1px solid #EFE9E6;'>")
+                    .append("<td style='color:#8C5319;font-size:10px;font-weight:bold;vertical-align:top;width:36%;'>")
+                    .append(escapeHtml(colName.toUpperCase(Locale.ROOT))).append("</td>")
+                    .append("<td style='color:#292322;font-size:12px;vertical-align:top;'>")
+                    .append(escapeHtml(val)).append("</td>")
+                    .append("</tr>");
+        }
+        body.append("</table></body></html>");
+
+        JOptionPane.showMessageDialog(this, body.toString(),
+                "Record details · " + screenTitle(screen), JOptionPane.PLAIN_MESSAGE);
     }
 
     private void openSelectedPrescriptionReview() {
@@ -1734,7 +1890,7 @@ public final class PharmacyAppFrame extends JFrame {
         addFormRow(form, 0, "Top-up amount (₱)", amount);
         content.add(form, BorderLayout.CENTER);
         JLabel note = new JLabel("The top-up updates the balance and records a TOP_UP row in the audit logs.");
-        note.setFont(new Font("Segoe UI", Font.PLAIN, 10));
+        note.setFont(FONT_SUB);
         note.setForeground(MUTED);
         JButton cancel = secondaryButton("Cancel");
         JButton save = primaryButton("Add balance");
@@ -1767,6 +1923,7 @@ public final class PharmacyAppFrame extends JFrame {
                         "Top-up not saved", JOptionPane.WARNING_MESSAGE);
             }
         });
+        dialog.getRootPane().setDefaultButton(save);
         dialog.setContentPane(content);
         dialog.pack();
         dialog.setMinimumSize(new Dimension(480, dialog.getHeight()));
@@ -1796,7 +1953,7 @@ public final class PharmacyAppFrame extends JFrame {
         addFormRow(form, 3, "Confirm password", confirm);
         content.add(form, BorderLayout.CENTER);
         JLabel note = new JLabel("Passwords are salted and hashed with PBKDF2; at least 8 characters.");
-        note.setFont(new Font("Segoe UI", Font.PLAIN, 10));
+        note.setFont(FONT_SUB);
         note.setForeground(MUTED);
         JButton cancel = secondaryButton("Cancel");
         JButton save = primaryButton("Register customer");
@@ -1833,6 +1990,7 @@ public final class PharmacyAppFrame extends JFrame {
                 java.util.Arrays.fill(repeated, '\0');
             }
         });
+        dialog.getRootPane().setDefaultButton(save);
         dialog.setContentPane(content);
         dialog.pack();
         dialog.setMinimumSize(new Dimension(500, dialog.getHeight()));
@@ -1840,7 +1998,6 @@ public final class PharmacyAppFrame extends JFrame {
         dialog.setVisible(true);
     }
 
-    /** Opens the counter dialog that records an externally issued paper prescription. */
     private void openRegisterPrescriptionDialog() {
         if (currentUser == null) {
             JOptionPane.showMessageDialog(this, "Sign in before registering prescriptions.",
@@ -1865,6 +2022,7 @@ public final class PharmacyAppFrame extends JFrame {
             if ("Active".equals(row.get(4))) customerBox.addItem(row.get(0) + " · " + row.get(1));
         }
         JLabel patientLabel = new JLabel("Select the customer; their account name becomes the patient record.");
+        patientLabel.setFont(FONT_SUB);
         patientLabel.setForeground(MUTED);
         customerBox.addActionListener(event -> {
             Object choice = customerBox.getSelectedItem();
@@ -1947,7 +2105,7 @@ public final class PharmacyAppFrame extends JFrame {
         content.add(form, BorderLayout.CENTER);
 
         JLabel note = new JLabel("The prescription and its medicine lines save in one recoverable write; documents stay outside Git.");
-        note.setFont(new Font("Segoe UI", Font.PLAIN, 10));
+        note.setFont(FONT_SUB);
         note.setForeground(MUTED);
         JButton cancel = secondaryButton("Cancel");
         JButton save = primaryButton("Register prescription");
@@ -1995,6 +2153,7 @@ public final class PharmacyAppFrame extends JFrame {
                         "Prescription not saved", JOptionPane.WARNING_MESSAGE);
             }
         });
+        dialog.getRootPane().setDefaultButton(save);
         dialog.setContentPane(content);
         dialog.pack();
         dialog.setMinimumSize(new Dimension(560, dialog.getHeight()));
@@ -2002,13 +2161,11 @@ public final class PharmacyAppFrame extends JFrame {
         dialog.setVisible(true);
     }
 
-    /** Extracts the patient name from a "CUS-00001 · Full Name" customer combo entry. */
     private String customerNameFromChoice(String choice) {
         int separator = choice.indexOf(" · ");
         return separator < 0 ? choice : choice.substring(separator + 3);
     }
 
-    /** Wraps a yyyy-MM-dd text field with an optional calendar button for one-click date entry. */
     private JPanel dateFieldWithPicker(JTextField field, Window owner, String title) {
         JPanel row = new JPanel(new FlowLayout(FlowLayout.LEFT, 8, 0));
         row.setOpaque(false);
@@ -2032,7 +2189,6 @@ public final class PharmacyAppFrame extends JFrame {
         return row;
     }
 
-    /** − / count / + quantity control that mirrors the sale cart stepper; no free-typed quantities. */
     private final class QuantityStepper extends JPanel {
         private final int min;
         private final int max;
@@ -2053,7 +2209,7 @@ public final class PharmacyAppFrame extends JFrame {
             minus.addActionListener(event -> setValue(value - 1));
             plus.getAccessibleContext().setAccessibleName("Increase the prescribed quantity");
             plus.addActionListener(event -> setValue(value + 1));
-            count.setFont(new Font("Segoe UI", Font.BOLD, 11));
+            count.setFont(FONT_MICRO);
             count.setForeground(TEXT);
             count.setPreferredSize(new Dimension(24, 28));
             add(minus);
@@ -2066,7 +2222,6 @@ public final class PharmacyAppFrame extends JFrame {
             return value;
         }
 
-        /** Returns the stepper to its starting value after a medicine line is added. */
         void reset() {
             setValue(resetValue);
         }
@@ -2083,7 +2238,6 @@ public final class PharmacyAppFrame extends JFrame {
         }
     }
 
-    /** Optional month-view calendar that fills the prescription date fields with a yyyy-MM-dd value. */
     private static final class DatePickerDialog extends JDialog {
         private final LocalDate today = LocalDate.now();
         private final LocalDate initial;
@@ -2138,7 +2292,6 @@ public final class PharmacyAppFrame extends JFrame {
             setLocationRelativeTo(owner);
         }
 
-        /** Shows the modal picker; returns the chosen date or null when closed without a choice. */
         LocalDate pick() {
             setVisible(true);
             return selected;
@@ -2164,7 +2317,7 @@ public final class PharmacyAppFrame extends JFrame {
             grid.setOpaque(false);
             for (String day : new String[] {"Su", "Mo", "Tu", "We", "Th", "Fr", "Sa"}) {
                 JLabel caption = new JLabel(day, SwingConstants.CENTER);
-                caption.setFont(new Font("Segoe UI", Font.BOLD, 10));
+                caption.setFont(FONT_MICRO);
                 caption.setForeground(MUTED);
                 grid.add(caption);
             }
@@ -2210,7 +2363,7 @@ public final class PharmacyAppFrame extends JFrame {
 
         private JButton footerButton(String label) {
             JButton button = new JButton(label);
-            button.setFont(new Font("Segoe UI", Font.PLAIN, 11));
+            button.setFont(FONT_SUB);
             button.setForeground(MAROON);
             button.setBackground(WHITE);
             button.setBorder(BorderFactory.createLineBorder(BORDER));
@@ -2268,7 +2421,7 @@ public final class PharmacyAppFrame extends JFrame {
         addFormRow(form, 2, "Expiration date (yyyy-MM-dd)", expiration);
         content.add(form, BorderLayout.CENTER);
         JLabel note = new JLabel("Enter delivered stock only. Saving creates a batch and updates available inventory.");
-        note.setFont(new Font("Segoe UI", Font.PLAIN, 10));
+        note.setFont(FONT_SUB);
         note.setForeground(MUTED);
         JButton cancel = secondaryButton("Cancel");
         JButton save = primaryButton("Approve and add stock");
@@ -2301,6 +2454,7 @@ public final class PharmacyAppFrame extends JFrame {
                         "Restock not saved", JOptionPane.WARNING_MESSAGE);
             }
         });
+        dialog.getRootPane().setDefaultButton(save);
         dialog.setContentPane(content);
         dialog.pack();
         dialog.setMinimumSize(new Dimension(520, dialog.getHeight()));
@@ -2482,16 +2636,76 @@ public final class PharmacyAppFrame extends JFrame {
         return (first + last).toUpperCase();
     }
 
+    private static final class RoundedCard extends JPanel {
+        private final int radius;
+        private final Color baseFill;
+        private final Color borderColor;
+        private final boolean interactive;
+        private boolean hover;
+
+        RoundedCard(int radius, Color baseFill, Color borderColor, boolean interactive) {
+            this.radius = radius;
+            this.baseFill = baseFill;
+            this.borderColor = borderColor;
+            this.interactive = interactive;
+            setOpaque(false);
+        }
+
+        void setHover(boolean value) {
+            hover = value;
+            repaint();
+        }
+
+        @Override
+        protected void paintComponent(Graphics graphics) {
+            Graphics2D g2 = (Graphics2D) graphics.create();
+            g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
+            int w = getWidth();
+            int h = getHeight();
+            Color fill = (interactive && hover) ? new Color(0xFD, 0xF8, 0xF8) : baseFill;
+            g2.setColor(fill);
+            g2.fillRoundRect(0, 0, w - 1, h - 1, radius, radius);
+            g2.setColor(borderColor);
+            g2.setStroke(new java.awt.BasicStroke(1f));
+            g2.drawRoundRect(0, 0, w - 1, h - 1, radius, radius);
+            g2.dispose();
+            super.paintComponent(graphics);
+        }
+    }
+
+    private static final class PillLabel extends JLabel {
+        private final Color fillColor;
+
+        PillLabel(String text, Color fillColor, Color textColor) {
+            super(text, SwingConstants.CENTER);
+            this.fillColor = fillColor;
+            setFont(FONT_MICRO);
+            setForeground(textColor);
+            setOpaque(false);
+            setBorder(BorderFactory.createEmptyBorder(4, 10, 4, 10));
+        }
+
+        @Override
+        protected void paintComponent(Graphics graphics) {
+            Graphics2D g2 = (Graphics2D) graphics.create();
+            g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
+            g2.setColor(fillColor);
+            g2.fillRoundRect(0, 0, getWidth(), getHeight(), getHeight(), getHeight());
+            g2.dispose();
+            super.paintComponent(graphics);
+        }
+    }
+
     private final class NavButton extends JButton {
         private boolean active;
 
-        NavButton(String label, String glyph) {
-            super(label, new NavGlyph(glyph));
+        NavButton(String label, NavGlyph.Kind iconKind) {
+            super(label, new NavGlyph(iconKind));
             setFont(new Font("Segoe UI", Font.BOLD, 12));
             setHorizontalAlignment(SwingConstants.LEFT);
             setIconTextGap(12);
-            setBorder(BorderFactory.createEmptyBorder(7, 10, 7, 10));
-            setFocusPainted(true);
+            setBorder(BorderFactory.createEmptyBorder(8, 11, 8, 11));
+            setFocusPainted(false);
             setContentAreaFilled(false);
             setOpaque(false);
             setCursor(java.awt.Cursor.getPredefinedCursor(java.awt.Cursor.HAND_CURSOR));
@@ -2554,25 +2768,85 @@ public final class PharmacyAppFrame extends JFrame {
     }
 
     private static final class NavGlyph implements Icon {
-        private final String glyph;
+        enum Kind {
+            GRID, CART, DIAMOND, STACK, REFRESH, RX, SWAP, RING, STAR, SHIELD, LIST
+        }
 
-        NavGlyph(String glyph) {
-            this.glyph = glyph;
+        private final Kind kind;
+
+        NavGlyph(Kind kind) {
+            this.kind = kind;
         }
 
         @Override
         public void paintIcon(Component component, Graphics graphics, int x, int y) {
-            Color foreground = component instanceof AbstractButton button ? button.getForeground() : TEXT;
-            graphics.setColor(foreground);
-            graphics.setFont(new Font("Segoe UI", Font.BOLD, glyph.length() > 1 ? 10 : 12));
-            graphics.drawString(glyph, x + (glyph.length() > 1 ? 0 : 2), y + 13);
+            Graphics2D g2 = (Graphics2D) graphics.create();
+            g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
+            Color fg = component instanceof AbstractButton button ? button.getForeground() : TEXT;
+            g2.setColor(fg);
+            g2.setStroke(new java.awt.BasicStroke(1.5f));
+
+            int cx = x + 9;
+            int cy = y + 9;
+            switch (kind) {
+                case GRID -> {
+                    g2.fillRoundRect(x + 2, y + 2, 5, 5, 2, 2);
+                    g2.fillRoundRect(x + 10, y + 2, 5, 5, 2, 2);
+                    g2.fillRoundRect(x + 2, y + 10, 5, 5, 2, 2);
+                    g2.fillRoundRect(x + 10, y + 10, 5, 5, 2, 2);
+                }
+                case CART -> {
+                    g2.drawRoundRect(x + 2, y + 4, 13, 10, 3, 3);
+                    g2.drawLine(x + 2, y + 8, x + 15, y + 8);
+                }
+                case DIAMOND -> {
+                    int[] px = {cx, x + 15, cx, x + 3};
+                    int[] py = {y + 2, cy, y + 16, cy};
+                    g2.drawPolygon(px, py, 4);
+                }
+                case STACK -> {
+                    g2.drawRoundRect(x + 3, y + 2, 11, 5, 2, 2);
+                    g2.drawRoundRect(x + 3, y + 10, 11, 5, 2, 2);
+                }
+                case REFRESH -> {
+                    g2.drawArc(x + 3, y + 3, 11, 11, 35, 285);
+                    g2.fillPolygon(new int[]{x + 13, x + 15, x + 11}, new int[]{y + 3, y + 6, y + 6}, 3);
+                }
+                case RX -> {
+                    g2.setFont(new Font("Segoe UI", Font.BOLD, 10));
+                    g2.drawString("Rx", x + 1, y + 13);
+                }
+                case SWAP -> {
+                    g2.drawLine(x + 3, y + 6, x + 14, y + 6);
+                    g2.drawLine(x + 11, y + 3, x + 14, y + 6);
+                    g2.drawLine(x + 14, y + 12, x + 3, y + 12);
+                    g2.drawLine(x + 6, y + 9, x + 3, y + 12);
+                }
+                case RING -> g2.drawOval(x + 3, y + 3, 11, 11);
+                case STAR -> {
+                    g2.drawLine(cx, y + 2, cx, y + 16);
+                    g2.drawLine(x + 2, cy, x + 16, cy);
+                    g2.drawLine(x + 4, y + 4, x + 14, y + 14);
+                    g2.drawLine(x + 14, y + 4, x + 4, y + 14);
+                }
+                case SHIELD -> {
+                    int[] sx = {cx, x + 14, x + 14, cx, x + 4, x + 4};
+                    int[] sy = {y + 2, y + 5, y + 10, y + 16, y + 10, y + 5};
+                    g2.drawPolygon(sx, sy, 6);
+                }
+                case LIST -> {
+                    g2.drawLine(x + 3, y + 4, x + 15, y + 4);
+                    g2.drawLine(x + 3, y + 9, x + 15, y + 9);
+                    g2.drawLine(x + 3, y + 14, x + 15, y + 14);
+                }
+            }
+            g2.dispose();
         }
 
         @Override public int getIconWidth() { return 18; }
         @Override public int getIconHeight() { return 18; }
     }
 
-    // POLYMORPHISM: this subclass customizes Swing's renderer behavior by overriding its method.
     private static final class StatusCellRenderer extends DefaultTableCellRenderer {
         @Override
         public Component getTableCellRendererComponent(JTable table, Object value, boolean selected,
@@ -2597,8 +2871,8 @@ public final class PharmacyAppFrame extends JFrame {
                     setForeground(new Color(0x34, 0x75, 0x53));
                 } else if (normalized.contains("pending") || normalized.contains("requested")
                         || normalized.contains("partial")) {
-                    setBackground(new Color(0xFF, 0xF3, 0xDF));
-                    setForeground(new Color(0x94, 0x65, 0x1D));
+                    setBackground(AMBER_SOFT);
+                    setForeground(AMBER);
                 } else if (normalized.contains("not sellable") || normalized.contains("expired")
                         || normalized.contains("quarantined") || normalized.contains("rejected")
                         || normalized.contains("inactive") || normalized.contains("depleted")
@@ -2614,7 +2888,7 @@ public final class PharmacyAppFrame extends JFrame {
                 setBackground(WHITE);
                 setForeground(TEXT);
             }
-            setFont(new Font("Segoe UI", Font.PLAIN, 12));
+            setFont(FONT_SUB);
             return this;
         }
     }
